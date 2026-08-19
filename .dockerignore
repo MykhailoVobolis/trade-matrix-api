@@ -1,0 +1,14 @@
+.git
+.github
+dist
+coverage
+node_modules
+.pnpm-store
+.turbo
+.DS_Store
+.env
+.env.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+README.md
