@@ -1,0 +1,1 @@
+export const GEO_LOCATION_PROVIDER = Symbol('GEO_LOCATION_PROVIDER');

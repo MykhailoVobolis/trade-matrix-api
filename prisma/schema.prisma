@@ -1,13 +1,119 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Get a free hosted Postgres database in seconds: `npx create-db`
-
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma"
+  provider = "prisma-client-js"
 }
 
 datasource db {
   provider = "postgresql"
+}
+
+enum UserRole {
+  member
+  admin
+}
+
+enum AuthProvider {
+  local
+  google
+}
+
+enum TwoFactorMethod {
+  email
+  totp
+}
+
+model User {
+  id           String       @id @default(cuid())
+  email        String       @unique
+  googleId     String?      @unique
+  authProvider AuthProvider @default(local)
+
+  isTwoFactorEnabled Boolean         @default(true)
+  twoFactorMethod    TwoFactorMethod @default(email)
+  isTotpEnabled      Boolean         @default(false)
+  totpSecret         String?
+
+  emailVerified                  Boolean   @default(false)
+  emailVerificationCodeHash      String?
+  emailVerificationCodeExpiresAt DateTime?
+  emailVerificationAttemptCount  Int       @default(0)
+  emailVerificationLastAttemptAt DateTime?
+
+  firstName                String
+  lastName                 String
+  role                     UserRole                  @default(member)
+  avatarUrl                String?
+  avatarPublicId           String?
+  passwordHash             String?
+  passwordResets           PasswordReset[]
+  sessions                 Session[]
+  twoFactorChallenges      TwoFactorChallenge[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+}
+
+model PasswordReset {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  codeHash      String
+  attemptCount  Int       @default(0)
+  lastAttemptAt DateTime?
+  expiresAt     DateTime
+  verifiedAt    DateTime?
+  consumedAt    DateTime?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@index([verifiedAt])
+  @@index([consumedAt])
+}
+
+model TwoFactorChallenge {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  method        TwoFactorMethod
+  codeHash      String
+  attemptCount  Int             @default(0)
+  lastAttemptAt DateTime?
+  expiresAt     DateTime
+  consumedAt    DateTime?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([userId])
+  @@index([method])
+  @@index([expiresAt])
+  @@index([consumedAt])
+}
+
+model Session {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  refreshTokenHash String @unique
+
+  userAgent  String?
+  deviceName String?
+  ipAddress  String?
+  location   String?
+
+  lastUsedAt DateTime?
+  expiresAt  DateTime
+  revokedAt  DateTime?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@index([revokedAt])
 }
