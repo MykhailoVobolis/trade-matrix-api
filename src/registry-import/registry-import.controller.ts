@@ -41,9 +41,7 @@ import { UploadedRegistryImportFile } from './types/registry-import-file.type';
 @UseGuards(JwtAuthGuard)
 @Controller('registry-imports')
 export class RegistryImportController {
-  constructor(
-    private readonly registryImportService: RegistryImportService,
-  ) {}
+  constructor(private readonly registryImportService: RegistryImportService) {}
 
   @Post('upload')
   @UseInterceptors(FilesInterceptor('files', REGISTRY_IMPORT_MAX_FILES))
@@ -82,7 +80,9 @@ export class RegistryImportController {
   }
 
   @Get()
-  @ApiOperation({ summary: 'List uploaded registry files for the current user' })
+  @ApiOperation({
+    summary: 'List uploaded registry files for the current user',
+  })
   @ApiOkResponse({ type: RegistryImportListResponseDto })
   @ApiUnauthorizedResponse({ description: 'Missing or invalid access token' })
   async listImports(
@@ -94,7 +94,9 @@ export class RegistryImportController {
   }
 
   @Get('stats')
-  @ApiOperation({ summary: 'Get registry import summary stats for the current user' })
+  @ApiOperation({
+    summary: 'Get registry import summary stats for the current user',
+  })
   @ApiOkResponse({ type: RegistryImportStatsDto })
   @ApiUnauthorizedResponse({ description: 'Missing or invalid access token' })
   getStats(
