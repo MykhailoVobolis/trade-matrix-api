@@ -24,6 +24,11 @@ function parseBooleanEnv(value: string | boolean | undefined): boolean {
         );
         const user = configService.get<string>('MAIL_USER');
         const pass = configService.get<string>('MAIL_PASSWORD');
+        const from = configService.get<string>(
+          'MAIL_FROM',
+          '"TradeMatrix" <no-reply@example.com>',
+        );
+        const replyTo = configService.get<string>('MAIL_REPLY_TO');
 
         return {
           transport: {
@@ -33,10 +38,8 @@ function parseBooleanEnv(value: string | boolean | undefined): boolean {
             auth: user && pass ? { user, pass } : undefined,
           },
           defaults: {
-            from: configService.get<string>(
-              'MAIL_FROM',
-              '"TradeMatrix" <no-reply@example.com>',
-            ),
+            from,
+            replyTo: replyTo || undefined,
           },
         };
       },
