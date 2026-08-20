@@ -9,6 +9,8 @@ import { read, utils } from 'xlsx';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.type';
 import { MessageResponseDto } from '../auth/dto/message-response.dto';
 import {
+  REGISTRY_IMPORT_COLUMN_SPECS,
+  type RegistryImportColumnSpec,
   REGISTRY_IMPORT_MAX_FILE_SIZE_BYTES,
   REGISTRY_IMPORT_MAX_FILES,
   REGISTRY_IMPORT_REQUIRED_HEADERS,
@@ -16,6 +18,7 @@ import {
 import { RegistryImportItemDto } from './dto/registry-import-item.dto';
 import { RegistryImportStatus } from './dto/registry-import-status.dto';
 import { RegistryImportStatsDto } from './dto/registry-import-stats.dto';
+import { ParsedRegistryRecord } from './types/parsed-registry-record.type';
 import { UploadedRegistryImportFile } from './types/registry-import-file.type';
 import { RegistryImportRepository } from './registry-import.repository';
 
@@ -237,10 +240,14 @@ export class RegistryImportService {
         return this.toRegistryImportItemDto(failedImport);
       }
 
+      const columnIndexes = this.buildColumnIndexes(headerRow);
       const dataRows = this.getNormalizedDataRows(rows.slice(1));
+      const parsedRows = dataRows.map((row, index) =>
+        this.mapRowToParsedRecord(row, index + 2, columnIndexes),
+      );
       const completedImport = await this.registryImportRepository.markCompleted(
         importId,
-        dataRows.length,
+        parsedRows.length,
       );
 
       return this.toRegistryImportItemDto(completedImport);
@@ -284,6 +291,55 @@ export class RegistryImportService {
     }
 
     return missingHeaders;
+  }
+
+  private buildColumnIndexes(headerRow: string[]): Map<string, number[]> {
+    const headerIndexes = new Map<string, number[]>();
+
+    headerRow.forEach((header, index) => {
+      if (!header) {
+        return;
+      }
+
+      const indexes = headerIndexes.get(header) ?? [];
+      indexes.push(index);
+      headerIndexes.set(header, indexes);
+    });
+
+    return headerIndexes;
+  }
+
+  private mapRowToParsedRecord(
+    row: string[],
+    rowNumber: number,
+    columnIndexes: Map<string, number[]>,
+  ): ParsedRegistryRecord {
+    const record: ParsedRegistryRecord = { rowNumber };
+
+    for (const columnSpec of REGISTRY_IMPORT_COLUMN_SPECS) {
+      record[columnSpec.field] = this.getMappedCellValue(
+        row,
+        columnIndexes,
+        columnSpec,
+      );
+    }
+
+    return record;
+  }
+
+  private getMappedCellValue(
+    row: string[],
+    columnIndexes: Map<string, number[]>,
+    columnSpec: RegistryImportColumnSpec,
+  ): string {
+    const indexes = columnIndexes.get(columnSpec.header) ?? [];
+    const targetIndex = indexes[columnSpec.occurrence - 1];
+
+    if (targetIndex === undefined) {
+      return '';
+    }
+
+    return row[targetIndex] ?? '';
   }
 
   private getNormalizedDataRows(
