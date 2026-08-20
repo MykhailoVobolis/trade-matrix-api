@@ -20,6 +20,12 @@ export class RegistryImportItemDto {
   @ApiProperty({ example: 3.0 })
   sizeMb: number;
 
+  @ApiProperty({ example: 3145728 })
+  fileSizeBytes: number;
+
+  @ApiProperty({ example: 3.0 })
+  fileSizeMb: number;
+
   @ApiProperty({ example: 15432 })
   rowCount: number;
 

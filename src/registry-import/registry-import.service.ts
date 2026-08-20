@@ -211,6 +211,9 @@ export class RegistryImportService {
     user: AuthenticatedUser,
     file: UploadedRegistryImportFile,
   ): Promise<RegistryImportItemDto> {
+    const normalizedFileName = this.normalizeUploadedFileName(
+      file.originalname,
+    );
     const contentHash = this.buildContentHash(file.buffer);
     const duplicateImport =
       await this.registryImportRepository.findByUserIdAndContentHash(
@@ -221,7 +224,7 @@ export class RegistryImportService {
     if (duplicateImport) {
       const failedImport = await this.registryImportRepository.createImport({
         userId: user.userId,
-        originalFileName: file.originalname,
+        originalFileName: normalizedFileName,
         contentHash,
         fileSizeBytes: BigInt(file.size),
         status: PrismaRegistryImportStatus.failed,
@@ -232,10 +235,13 @@ export class RegistryImportService {
       return this.toRegistryImportItemDto(failedImport);
     }
 
-    const validationError = this.getFileValidationError(file);
+    const validationError = this.getFileValidationError(
+      normalizedFileName,
+      file.size,
+    );
     const importRecord = await this.registryImportRepository.createImport({
       userId: user.userId,
-      originalFileName: file.originalname,
+      originalFileName: normalizedFileName,
       contentHash,
       fileSizeBytes: BigInt(file.size),
       status: validationError
@@ -249,25 +255,56 @@ export class RegistryImportService {
       return this.toRegistryImportItemDto(importRecord);
     }
 
-    return this.processWorkbookImport(importRecord.id, user.userId, file);
+    this.scheduleWorkbookImportProcessing(importRecord.id, user.userId, file);
+
+    return this.toRegistryImportItemDto(importRecord);
   }
 
   private getFileValidationError(
-    file: UploadedRegistryImportFile,
+    fileName: string,
+    fileSizeBytes: number,
   ): string | null {
-    if (!file.originalname.toLowerCase().endsWith('.xlsx')) {
+    if (!fileName.toLowerCase().endsWith('.xlsx')) {
       return 'Only .xlsx files are supported.';
     }
 
-    if (file.size > REGISTRY_IMPORT_MAX_FILE_SIZE_BYTES) {
+    if (fileSizeBytes > REGISTRY_IMPORT_MAX_FILE_SIZE_BYTES) {
       return 'File size must not exceed 10 MB.';
     }
 
     return null;
   }
 
+  private normalizeUploadedFileName(fileName: string): string {
+    const normalizedInput = fileName.normalize('NFC');
+
+    if (!this.looksLikeMultipartMojibake(normalizedInput)) {
+      return normalizedInput;
+    }
+
+    const decoded = Buffer.from(normalizedInput, 'latin1')
+      .toString('utf8')
+      .normalize('NFC');
+
+    return this.looksLikeMultipartMojibake(decoded) ? normalizedInput : decoded;
+  }
+
+  private looksLikeMultipartMojibake(value: string): boolean {
+    return /(?:Ã.|Ð.|Ñ.)/u.test(value);
+  }
+
   private buildContentHash(buffer: Buffer): string {
     return createHash('sha256').update(buffer).digest('hex');
+  }
+
+  private scheduleWorkbookImportProcessing(
+    importId: string,
+    userId: string,
+    file: UploadedRegistryImportFile,
+  ): void {
+    setImmediate(() => {
+      void this.processWorkbookImport(importId, userId, file);
+    });
   }
 
   private async processWorkbookImport(
@@ -461,14 +498,14 @@ export class RegistryImportService {
       rowNumber: row.rowNumber,
       sellerRegionCode: this.toOptionalString(row.sellerRegionCode),
       sellerDistrictCode: this.toOptionalString(row.sellerDistrictCode),
-      sellerTaxNumber: this.toOptionalString(row.sellerTaxNumber),
-      sellerIpn: this.toOptionalString(row.sellerIpn),
+      sellerTaxNumber: this.toOptionalNumericIdentifier(row.sellerTaxNumber),
+      sellerIpn: this.toOptionalNumericIdentifier(row.sellerIpn),
       sellerName: this.toOptionalString(row.sellerName),
       sellerStatus: this.toOptionalString(row.sellerStatus),
       buyerRegionCode: this.toOptionalString(row.buyerRegionCode),
       buyerDistrictCode: this.toOptionalString(row.buyerDistrictCode),
-      buyerTaxNumber: this.toOptionalString(row.buyerTaxNumber),
-      buyerIpn: this.toOptionalString(row.buyerIpn),
+      buyerTaxNumber: this.toOptionalNumericIdentifier(row.buyerTaxNumber),
+      buyerIpn: this.toOptionalNumericIdentifier(row.buyerIpn),
       buyerName: this.toOptionalString(row.buyerName),
       buyerStatus: this.toOptionalString(row.buyerStatus),
       registrationNumber: this.toOptionalString(row.registrationNumber),
@@ -536,6 +573,59 @@ export class RegistryImportService {
     const normalized = value?.trim();
 
     return normalized ? normalized : null;
+  }
+
+  private toOptionalNumericIdentifier(
+    value: string | undefined,
+  ): string | null {
+    const normalized = this.toOptionalString(value);
+
+    if (!normalized) {
+      return null;
+    }
+
+    return this.normalizeScientificNotation(normalized) ?? normalized;
+  }
+
+  private normalizeScientificNotation(value: string): string | null {
+    const compact = value.replaceAll(' ', '').replace(',', '.');
+    const match = /^([+-]?\d+)(?:\.(\d+))?[eE]([+-]?\d+)$/u.exec(compact);
+
+    if (!match) {
+      return null;
+    }
+
+    const [, integerPart, fractionalPart = '', exponentRaw] = match;
+    const exponent = Number.parseInt(exponentRaw, 10);
+
+    if (Number.isNaN(exponent)) {
+      return null;
+    }
+
+    const sign = integerPart.startsWith('-') ? '-' : '';
+    const unsignedIntegerPart =
+      integerPart.startsWith('-') || integerPart.startsWith('+')
+        ? integerPart.slice(1)
+        : integerPart;
+    const digits = `${unsignedIntegerPart}${fractionalPart}`;
+    const decimalShift = exponent - fractionalPart.length;
+
+    if (decimalShift < 0) {
+      const decimalPosition = digits.length + decimalShift;
+
+      if (decimalPosition <= 0) {
+        return null;
+      }
+
+      const integerDigits = digits.slice(0, decimalPosition);
+      const fractionalDigits = digits
+        .slice(decimalPosition)
+        .replace(/0+$/u, '');
+
+      return fractionalDigits.length > 0 ? null : `${sign}${integerDigits}`;
+    }
+
+    return `${sign}${digits}${'0'.repeat(decimalShift)}`;
   }
 
   private toOptionalDecimal(value: string | undefined): string | null {
@@ -731,6 +821,8 @@ export class RegistryImportService {
       status: this.toDtoStatus(importRecord.status),
       sizeBytes,
       sizeMb: Number((sizeBytes / (1024 * 1024)).toFixed(1)),
+      fileSizeBytes: sizeBytes,
+      fileSizeMb: Number((sizeBytes / (1024 * 1024)).toFixed(1)),
       rowCount: importRecord.rowCount,
       errorMessage: importRecord.errorMessage,
       createdAt: importRecord.createdAt,
