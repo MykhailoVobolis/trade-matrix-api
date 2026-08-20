@@ -3,7 +3,10 @@ import {
   Injectable,
   NotImplementedException,
 } from '@nestjs/common';
-import { RegistryImportStatus as PrismaRegistryImportStatus } from '@prisma/client';
+import {
+  Prisma,
+  RegistryImportStatus as PrismaRegistryImportStatus,
+} from '@prisma/client';
 import { createHash, randomUUID } from 'crypto';
 import { read, utils } from 'xlsx';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.type';
@@ -11,6 +14,7 @@ import { MessageResponseDto } from '../auth/dto/message-response.dto';
 import {
   REGISTRY_IMPORT_COLUMN_SPECS,
   type RegistryImportColumnSpec,
+  REGISTRY_IMPORT_INSERT_BATCH_SIZE,
   REGISTRY_IMPORT_MAX_FILE_SIZE_BYTES,
   REGISTRY_IMPORT_MAX_FILES,
   REGISTRY_IMPORT_REQUIRED_HEADERS,
@@ -161,7 +165,7 @@ export class RegistryImportService {
       return this.toRegistryImportItemDto(importRecord);
     }
 
-    return this.processWorkbookImport(importRecord.id, file);
+    return this.processWorkbookImport(importRecord.id, user.userId, file);
   }
 
   private getFileValidationError(
@@ -188,6 +192,7 @@ export class RegistryImportService {
 
   private async processWorkbookImport(
     importId: string,
+    userId: string,
     file: UploadedRegistryImportFile,
   ): Promise<RegistryImportItemDto> {
     await this.registryImportRepository.markProcessing(importId);
@@ -245,6 +250,7 @@ export class RegistryImportService {
       const parsedRows = dataRows.map((row, index) =>
         this.mapRowToParsedRecord(row, index + 2, columnIndexes),
       );
+      await this.persistParsedRows(importId, userId, parsedRows);
       const completedImport = await this.registryImportRepository.markCompleted(
         importId,
         parsedRows.length,
@@ -252,9 +258,10 @@ export class RegistryImportService {
 
       return this.toRegistryImportItemDto(completedImport);
     } catch {
+      await this.registryImportRepository.deleteRecordsByImportId(importId);
       const failedImport = await this.registryImportRepository.markFailed(
         importId,
-        'Failed to parse the XLSX file.',
+        'Failed to parse or persist the XLSX file.',
       );
 
       return this.toRegistryImportItemDto(failedImport);
@@ -342,6 +349,75 @@ export class RegistryImportService {
     return row[targetIndex] ?? '';
   }
 
+  private async persistParsedRows(
+    importId: string,
+    userId: string,
+    parsedRows: ParsedRegistryRecord[],
+  ): Promise<void> {
+    for (
+      let index = 0;
+      index < parsedRows.length;
+      index += REGISTRY_IMPORT_INSERT_BATCH_SIZE
+    ) {
+      const batch = parsedRows
+        .slice(index, index + REGISTRY_IMPORT_INSERT_BATCH_SIZE)
+        .map((row) =>
+          this.toRegistryRecordCreateManyInput(importId, userId, row),
+        );
+
+      await this.registryImportRepository.createManyRecords(batch);
+    }
+  }
+
+  private toRegistryRecordCreateManyInput(
+    importId: string,
+    userId: string,
+    row: ParsedRegistryRecord,
+  ): Prisma.RegistryRecordCreateManyInput {
+    return {
+      id: randomUUID(),
+      userId,
+      importId,
+      rowNumber: row.rowNumber,
+      sellerRegionCode: this.toOptionalString(row.sellerRegionCode),
+      sellerDistrictCode: this.toOptionalString(row.sellerDistrictCode),
+      sellerTaxNumber: this.toOptionalString(row.sellerTaxNumber),
+      sellerIpn: this.toOptionalString(row.sellerIpn),
+      sellerName: this.toOptionalString(row.sellerName),
+      sellerStatus: this.toOptionalString(row.sellerStatus),
+      buyerRegionCode: this.toOptionalString(row.buyerRegionCode),
+      buyerDistrictCode: this.toOptionalString(row.buyerDistrictCode),
+      buyerTaxNumber: this.toOptionalString(row.buyerTaxNumber),
+      buyerIpn: this.toOptionalString(row.buyerIpn),
+      buyerName: this.toOptionalString(row.buyerName),
+      buyerStatus: this.toOptionalString(row.buyerStatus),
+      registrationNumber: this.toOptionalString(row.registrationNumber),
+      invoiceNumber: this.toOptionalString(row.invoiceNumber),
+      invoiceDate: this.toOptionalDate(row.invoiceDate),
+      registrationDate: this.toOptionalDate(row.registrationDate),
+      erpnStatus: this.toOptionalString(row.erpnStatus),
+      isExcluded: this.toOptionalBoolean(row.isExcluded),
+      totalAmountPayable: this.toOptionalDecimal(row.totalAmountPayable),
+      totalVatAmount: this.toOptionalDecimal(row.totalVatAmount),
+      supplyAmount20: this.toOptionalDecimal(row.supplyAmount20),
+      supplyAmount14: this.toOptionalDecimal(row.supplyAmount14),
+      supplyAmount7: this.toOptionalDecimal(row.supplyAmount7),
+      adjustmentCount: this.toOptionalInt(row.adjustmentCount),
+      adjustmentAmount: this.toOptionalDecimal(row.adjustmentAmount),
+      unitPriceDeclared: this.toOptionalDecimal(row.unitPriceDeclared),
+      itemDescription: this.toOptionalString(row.itemDescription),
+      uktzedCode: this.toOptionalString(row.uktzedCode),
+      dkppCode: this.toOptionalString(row.dkppCode),
+      unitName: this.toOptionalString(row.unitName),
+      quantity: this.toOptionalDecimal(row.quantity),
+      unitPriceActual: this.toOptionalDecimal(row.unitPriceActual),
+      supplyAmountWithoutVat: this.toOptionalDecimal(
+        row.supplyAmountWithoutVat,
+      ),
+      vatAmount: this.toOptionalDecimal(row.vatAmount),
+    };
+  }
+
   private getNormalizedDataRows(
     rows: (string | number | boolean | null)[][],
   ): string[][] {
@@ -374,6 +450,79 @@ export class RegistryImportService {
     }
 
     return String(value).trim();
+  }
+
+  private toOptionalString(value: string | undefined): string | null {
+    const normalized = value?.trim();
+
+    return normalized ? normalized : null;
+  }
+
+  private toOptionalDecimal(value: string | undefined): string | null {
+    const normalized = this.toOptionalString(value);
+
+    if (!normalized) {
+      return null;
+    }
+
+    const decimal = normalized.replaceAll(' ', '').replace(',', '.');
+
+    return /^-?\d+(?:\.\d+)?$/u.test(decimal) ? decimal : null;
+  }
+
+  private toOptionalInt(value: string | undefined): number | null {
+    const normalized = this.toOptionalString(value);
+
+    if (!normalized) {
+      return null;
+    }
+
+    const integer = Number.parseInt(normalized.replaceAll(' ', ''), 10);
+
+    return Number.isNaN(integer) ? null : integer;
+  }
+
+  private toOptionalBoolean(value: string | undefined): boolean | null {
+    const normalized = this.toOptionalString(value)?.toLowerCase();
+
+    if (!normalized) {
+      return null;
+    }
+
+    if (['1', 'true', 'yes', 'y', 'так', 'т'].includes(normalized)) {
+      return true;
+    }
+
+    if (['0', 'false', 'no', 'n', 'ні', 'н'].includes(normalized)) {
+      return false;
+    }
+
+    return null;
+  }
+
+  private toOptionalDate(value: string | undefined): Date | null {
+    const normalized = this.toOptionalString(value);
+
+    if (!normalized) {
+      return null;
+    }
+
+    const dotSeparatedMatch = /^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$/u.exec(
+      normalized,
+    );
+
+    if (dotSeparatedMatch) {
+      const [, day, month, year] = dotSeparatedMatch;
+      const date = new Date(
+        Date.UTC(Number(year), Number(month) - 1, Number(day)),
+      );
+
+      return Number.isNaN(date.getTime()) ? null : date;
+    }
+
+    const isoDate = new Date(normalized);
+
+    return Number.isNaN(isoDate.getTime()) ? null : isoDate;
   }
 
   private toRegistryImportItemDto(

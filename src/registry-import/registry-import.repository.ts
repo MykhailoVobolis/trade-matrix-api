@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { RegistryImportStatus } from '@prisma/client';
+import { Prisma, RegistryImportStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 export type CreateRegistryImportInput = {
@@ -29,6 +29,12 @@ export class RegistryImportRepository {
 
   createImport(data: CreateRegistryImportInput) {
     return this.prisma.registryImport.create({
+      data,
+    });
+  }
+
+  createManyRecords(data: Prisma.RegistryRecordCreateManyInput[]) {
+    return this.prisma.registryRecord.createMany({
       data,
     });
   }
@@ -94,6 +100,12 @@ export class RegistryImportRepository {
         finishedAt: new Date(),
         errorMessage,
       },
+    });
+  }
+
+  deleteRecordsByImportId(importId: string) {
+    return this.prisma.registryRecord.deleteMany({
+      where: { importId },
     });
   }
 }
