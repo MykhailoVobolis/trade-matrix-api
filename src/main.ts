@@ -30,8 +30,8 @@ async function bootstrap() {
   );
 
   const swaggerConfig = new DocumentBuilder()
-    .setTitle('NestJS Starter Template')
-    .setDescription('Starter API documentation')
+    .setTitle('Trade Matrix API')
+    .setDescription('Trade Matrix API documentation')
     .setVersion('1.0.0')
     .addBearerAuth()
     .build();
