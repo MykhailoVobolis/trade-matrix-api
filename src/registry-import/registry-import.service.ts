@@ -1,7 +1,7 @@
 import {
   BadRequestException,
   Injectable,
-  NotImplementedException,
+  NotFoundException,
 } from '@nestjs/common';
 import {
   Prisma,
@@ -111,16 +111,24 @@ export class RegistryImportService {
     };
   }
 
-  deleteImport(
-    _user: AuthenticatedUser,
-    _importId: string,
+  async deleteImport(
+    user: AuthenticatedUser,
+    importId: string,
   ): Promise<MessageResponseDto> {
-    void this.registryImportRepository;
-    void _user;
-    void _importId;
-    throw new NotImplementedException(
-      'Registry import deletion is not implemented yet.',
+    const ownedImport = await this.registryImportRepository.findOwnedImportById(
+      importId,
+      user.userId,
     );
+
+    if (!ownedImport) {
+      throw new NotFoundException('Registry import not found');
+    }
+
+    await this.registryImportRepository.deleteImportWithRecords(importId);
+
+    return {
+      message: 'Registry import deleted successfully.',
+    };
   }
 
   private async createImportMetadataForFile(

@@ -18,6 +18,15 @@ export type CreateRegistryImportInput = {
 export class RegistryImportRepository {
   constructor(private readonly prisma: PrismaService) {}
 
+  findOwnedImportById(importId: string, userId: string) {
+    return this.prisma.registryImport.findFirst({
+      where: {
+        id: importId,
+        userId,
+      },
+    });
+  }
+
   findByUserIdAndContentHash(userId: string, contentHash: string) {
     return this.prisma.registryImport.findFirst({
       where: {
@@ -107,5 +116,22 @@ export class RegistryImportRepository {
     return this.prisma.registryRecord.deleteMany({
       where: { importId },
     });
+  }
+
+  deleteImportById(importId: string) {
+    return this.prisma.registryImport.delete({
+      where: { id: importId },
+    });
+  }
+
+  async deleteImportWithRecords(importId: string): Promise<void> {
+    await this.prisma.$transaction([
+      this.prisma.registryRecord.deleteMany({
+        where: { importId },
+      }),
+      this.prisma.registryImport.delete({
+        where: { id: importId },
+      }),
+    ]);
   }
 }
