@@ -5,11 +5,13 @@ import {
 } from '@nestjs/common';
 import { RegistryImportStatus as PrismaRegistryImportStatus } from '@prisma/client';
 import { createHash, randomUUID } from 'crypto';
+import { read, utils } from 'xlsx';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.type';
 import { MessageResponseDto } from '../auth/dto/message-response.dto';
 import {
   REGISTRY_IMPORT_MAX_FILE_SIZE_BYTES,
   REGISTRY_IMPORT_MAX_FILES,
+  REGISTRY_IMPORT_REQUIRED_HEADERS,
 } from './constants/registry-import.constants';
 import { RegistryImportItemDto } from './dto/registry-import-item.dto';
 import { RegistryImportStatus } from './dto/registry-import-status.dto';
@@ -152,7 +154,11 @@ export class RegistryImportService {
       finishedAt: validationError ? new Date() : null,
     });
 
-    return this.toRegistryImportItemDto(importRecord);
+    if (validationError) {
+      return this.toRegistryImportItemDto(importRecord);
+    }
+
+    return this.processWorkbookImport(importRecord.id, file);
   }
 
   private getFileValidationError(
@@ -175,6 +181,143 @@ export class RegistryImportService {
 
   private buildFailedMetadataHash(contentHash: string): string {
     return `${contentHash}:failed:${randomUUID()}`;
+  }
+
+  private async processWorkbookImport(
+    importId: string,
+    file: UploadedRegistryImportFile,
+  ): Promise<RegistryImportItemDto> {
+    await this.registryImportRepository.markProcessing(importId);
+
+    try {
+      const workbook = read(file.buffer, {
+        type: 'buffer',
+        dense: true,
+      });
+      const firstSheetName = workbook.SheetNames[0];
+
+      if (!firstSheetName) {
+        const failedImport = await this.registryImportRepository.markFailed(
+          importId,
+          'The workbook does not contain any sheets.',
+        );
+
+        return this.toRegistryImportItemDto(failedImport);
+      }
+
+      const firstSheet = workbook.Sheets[firstSheetName];
+      const rows = utils.sheet_to_json<(string | number | boolean | null)[]>(
+        firstSheet,
+        {
+          header: 1,
+          raw: false,
+          defval: null,
+          blankrows: false,
+        },
+      );
+
+      if (rows.length === 0) {
+        const failedImport = await this.registryImportRepository.markFailed(
+          importId,
+          'The worksheet is empty.',
+        );
+
+        return this.toRegistryImportItemDto(failedImport);
+      }
+
+      const headerRow = rows[0].map((value) => this.normalizeCellValue(value));
+      const missingHeaders = this.getMissingHeaders(headerRow);
+
+      if (missingHeaders.length > 0) {
+        const failedImport = await this.registryImportRepository.markFailed(
+          importId,
+          `Missing required columns: ${missingHeaders.join(', ')}.`,
+        );
+
+        return this.toRegistryImportItemDto(failedImport);
+      }
+
+      const dataRows = this.getNormalizedDataRows(rows.slice(1));
+      const completedImport = await this.registryImportRepository.markCompleted(
+        importId,
+        dataRows.length,
+      );
+
+      return this.toRegistryImportItemDto(completedImport);
+    } catch {
+      const failedImport = await this.registryImportRepository.markFailed(
+        importId,
+        'Failed to parse the XLSX file.',
+      );
+
+      return this.toRegistryImportItemDto(failedImport);
+    }
+  }
+
+  private getMissingHeaders(headerRow: string[]): string[] {
+    const actualCounts = new Map<string, number>();
+
+    for (const header of headerRow) {
+      if (!header) {
+        continue;
+      }
+
+      actualCounts.set(header, (actualCounts.get(header) ?? 0) + 1);
+    }
+
+    const missingHeaders: string[] = [];
+    const requiredCounts = new Map<string, number>();
+
+    for (const requiredHeader of REGISTRY_IMPORT_REQUIRED_HEADERS) {
+      requiredCounts.set(
+        requiredHeader,
+        (requiredCounts.get(requiredHeader) ?? 0) + 1,
+      );
+    }
+
+    for (const [header, requiredCount] of requiredCounts) {
+      const actualCount = actualCounts.get(header) ?? 0;
+
+      for (let index = actualCount; index < requiredCount; index += 1) {
+        missingHeaders.push(header);
+      }
+    }
+
+    return missingHeaders;
+  }
+
+  private getNormalizedDataRows(
+    rows: (string | number | boolean | null)[][],
+  ): string[][] {
+    const normalizedRows = rows.map((row) =>
+      row.map((value) => this.normalizeCellValue(value)),
+    );
+
+    let lastNonEmptyRowIndex = -1;
+
+    normalizedRows.forEach((row, index) => {
+      if (row.some((value) => value.length > 0)) {
+        lastNonEmptyRowIndex = index;
+      }
+    });
+
+    if (lastNonEmptyRowIndex === -1) {
+      return [];
+    }
+
+    return normalizedRows
+      .slice(0, lastNonEmptyRowIndex + 1)
+      .filter((row) => row.some((value) => value.length > 0));
+  }
+
+  private normalizeCellValue(
+    value: string | number | boolean | null | undefined,
+  ): string {
+    if (value === null || value === undefined) {
+      return '';
+    }
+
+    return String(value).trim();
   }
 
   private toRegistryImportItemDto(
