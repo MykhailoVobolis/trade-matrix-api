@@ -88,7 +88,7 @@ export class ListRegistryRecordsQueryDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  pageSize?: number;
+  perPage?: number;
 
   @ApiPropertyOptional({
     example: 'invoiceDate',

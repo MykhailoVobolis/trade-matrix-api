@@ -11,6 +11,7 @@ import { createHash, randomUUID } from 'crypto';
 import { read, utils } from 'xlsx';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.type';
 import { MessageResponseDto } from '../auth/dto/message-response.dto';
+import { ListRegistryImportsQueryDto } from './dto/list-registry-imports-query.dto';
 import { ListRegistryRecordsQueryDto } from './dto/list-registry-records-query.dto';
 import {
   REGISTRY_IMPORT_COLUMN_SPECS,
@@ -21,6 +22,7 @@ import {
   REGISTRY_IMPORT_REQUIRED_HEADERS,
 } from './constants/registry-import.constants';
 import { RegistryImportItemDto } from './dto/registry-import-item.dto';
+import { RegistryImportListResponseDto } from './dto/registry-import-list-response.dto';
 import { RegistryImportStatus } from './dto/registry-import-status.dto';
 import { RegistryImportStatsDto } from './dto/registry-import-stats.dto';
 import { RegistryRecordItemDto } from './dto/registry-record-item.dto';
@@ -86,12 +88,31 @@ export class RegistryImportService {
     );
   }
 
-  async listImports(user: AuthenticatedUser): Promise<RegistryImportItemDto[]> {
-    const imports = await this.registryImportRepository.listByUserId(
-      user.userId,
-    );
+  async listImports(
+    user: AuthenticatedUser,
+    query: ListRegistryImportsQueryDto,
+  ): Promise<RegistryImportListResponseDto> {
+    const page = query.page ?? 1;
+    const perPage = query.perPage ?? 5;
+    const skip = (page - 1) * perPage;
+    const where = this.buildRegistryImportWhere(query);
 
-    return imports.map((item) => this.toRegistryImportItemDto(item));
+    const [imports, total] = await Promise.all([
+      this.registryImportRepository.listImports({
+        userId: user.userId,
+        where,
+        skip,
+        take: perPage,
+      }),
+      this.registryImportRepository.countImports(user.userId, where),
+    ]);
+
+    return {
+      items: imports.map((item) => this.toRegistryImportItemDto(item)),
+      total,
+      page,
+      perPage,
+    };
   }
 
   async getStats(user: AuthenticatedUser): Promise<RegistryImportStatsDto> {
@@ -139,8 +160,8 @@ export class RegistryImportService {
     query: ListRegistryRecordsQueryDto,
   ): Promise<RegistryRecordListResponseDto> {
     const page = query.page ?? 1;
-    const pageSize = query.pageSize ?? 50;
-    const skip = (page - 1) * pageSize;
+    const perPage = query.perPage ?? 50;
+    const skip = (page - 1) * perPage;
     const where = this.buildRegistryRecordWhere(query);
     const orderBy = this.buildRegistryRecordOrderBy(
       query.sortBy ?? 'invoiceDate',
@@ -152,7 +173,7 @@ export class RegistryImportService {
         userId: user.userId,
         where,
         skip,
-        take: pageSize,
+        take: perPage,
         orderBy,
       }),
       this.registryImportRepository.countRecords(user.userId, where),
@@ -162,7 +183,7 @@ export class RegistryImportService {
       items: items.map((item) => this.toRegistryRecordItemDto(item)),
       total,
       page,
-      pageSize,
+      perPage,
     };
   }
 
@@ -603,6 +624,20 @@ export class RegistryImportService {
         query.invoiceDateFrom,
         query.invoiceDateTo,
       ),
+    };
+  }
+
+  private buildRegistryImportWhere(
+    query: ListRegistryImportsQueryDto,
+  ): Prisma.RegistryImportWhereInput {
+    return {
+      status: query.status,
+      originalFileName: query.search
+        ? {
+            contains: query.search.trim(),
+            mode: 'insensitive',
+          }
+        : undefined,
     };
   }
 

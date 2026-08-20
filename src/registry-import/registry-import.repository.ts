@@ -22,6 +22,13 @@ export type ListRegistryRecordsParams = {
   orderBy: Prisma.RegistryRecordOrderByWithRelationInput;
 };
 
+export type ListRegistryImportsParams = {
+  userId: string;
+  where: Prisma.RegistryImportWhereInput;
+  skip: number;
+  take: number;
+};
+
 @Injectable()
 export class RegistryImportRepository {
   constructor(private readonly prisma: PrismaService) {}
@@ -56,11 +63,25 @@ export class RegistryImportRepository {
     });
   }
 
-  listByUserId(userId: string) {
+  listImports(params: ListRegistryImportsParams) {
     return this.prisma.registryImport.findMany({
-      where: { userId },
+      where: {
+        userId: params.userId,
+        ...params.where,
+      },
+      skip: params.skip,
+      take: params.take,
       orderBy: {
         createdAt: 'desc',
+      },
+    });
+  }
+
+  countImports(userId: string, where: Prisma.RegistryImportWhereInput) {
+    return this.prisma.registryImport.count({
+      where: {
+        userId,
+        ...where,
       },
     });
   }

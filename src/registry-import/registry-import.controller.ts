@@ -31,6 +31,7 @@ import {
   REGISTRY_IMPORT_MAX_FILES,
   REGISTRY_IMPORT_MAX_FILE_SIZE_BYTES,
 } from './constants/registry-import.constants';
+import { ListRegistryImportsQueryDto } from './dto/list-registry-imports-query.dto';
 import { RegistryImportListResponseDto } from './dto/registry-import-list-response.dto';
 import { ListRegistryRecordsQueryDto } from './dto/list-registry-records-query.dto';
 import { RegistryImportStatsDto } from './dto/registry-import-stats.dto';
@@ -90,10 +91,9 @@ export class RegistryImportController {
   @ApiUnauthorizedResponse({ description: 'Missing or invalid access token' })
   async listImports(
     @CurrentUser() user: AuthenticatedUser,
+    @Query() query: ListRegistryImportsQueryDto,
   ): Promise<RegistryImportListResponseDto> {
-    return {
-      items: await this.registryImportService.listImports(user),
-    };
+    return this.registryImportService.listImports(user, query);
   }
 
   @Get('stats')

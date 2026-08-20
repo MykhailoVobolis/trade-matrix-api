@@ -12,5 +12,5 @@ export class RegistryRecordListResponseDto {
   page: number;
 
   @ApiProperty({ example: 50 })
-  pageSize: number;
+  perPage: number;
 }
