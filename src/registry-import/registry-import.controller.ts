@@ -1,4 +1,5 @@
 import {
+  Query,
   Controller,
   Delete,
   Get,
@@ -31,7 +32,9 @@ import {
   REGISTRY_IMPORT_MAX_FILE_SIZE_BYTES,
 } from './constants/registry-import.constants';
 import { RegistryImportListResponseDto } from './dto/registry-import-list-response.dto';
+import { ListRegistryRecordsQueryDto } from './dto/list-registry-records-query.dto';
 import { RegistryImportStatsDto } from './dto/registry-import-stats.dto';
+import { RegistryRecordListResponseDto } from './dto/registry-record-list-response.dto';
 import { RegistryImportUploadResponseDto } from './dto/registry-import-upload-response.dto';
 import { RegistryImportService } from './registry-import.service';
 import { UploadedRegistryImportFile } from './types/registry-import-file.type';
@@ -103,6 +106,19 @@ export class RegistryImportController {
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<RegistryImportStatsDto> {
     return this.registryImportService.getStats(user);
+  }
+
+  @Get('records')
+  @ApiOperation({
+    summary: 'List filtered registry records for the current user',
+  })
+  @ApiOkResponse({ type: RegistryRecordListResponseDto })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid access token' })
+  listRecords(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: ListRegistryRecordsQueryDto,
+  ): Promise<RegistryRecordListResponseDto> {
+    return this.registryImportService.listRecords(user, query);
   }
 
   @Delete(':id')

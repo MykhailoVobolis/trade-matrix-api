@@ -11,6 +11,7 @@ import { createHash, randomUUID } from 'crypto';
 import { read, utils } from 'xlsx';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.type';
 import { MessageResponseDto } from '../auth/dto/message-response.dto';
+import { ListRegistryRecordsQueryDto } from './dto/list-registry-records-query.dto';
 import {
   REGISTRY_IMPORT_COLUMN_SPECS,
   type RegistryImportColumnSpec,
@@ -22,6 +23,8 @@ import {
 import { RegistryImportItemDto } from './dto/registry-import-item.dto';
 import { RegistryImportStatus } from './dto/registry-import-status.dto';
 import { RegistryImportStatsDto } from './dto/registry-import-stats.dto';
+import { RegistryRecordItemDto } from './dto/registry-record-item.dto';
+import { RegistryRecordListResponseDto } from './dto/registry-record-list-response.dto';
 import { ParsedRegistryRecord } from './types/parsed-registry-record.type';
 import { UploadedRegistryImportFile } from './types/registry-import-file.type';
 import { RegistryImportRepository } from './registry-import.repository';
@@ -36,6 +39,26 @@ type RegistryImportRecord = {
   createdAt: Date;
   startedAt: Date | null;
   finishedAt: Date | null;
+};
+
+type RegistryRecordListItem = {
+  id: string;
+  importId: string;
+  rowNumber: number;
+  sellerRegionCode: string | null;
+  sellerDistrictCode: string | null;
+  sellerIpn: string | null;
+  sellerName: string | null;
+  buyerRegionCode: string | null;
+  buyerDistrictCode: string | null;
+  buyerIpn: string | null;
+  buyerName: string | null;
+  invoiceDate: Date | null;
+  itemDescription: string | null;
+  uktzedCode: string | null;
+  unitName: string | null;
+  unitPriceActual: Prisma.Decimal | null;
+  createdAt: Date;
 };
 
 @Injectable()
@@ -108,6 +131,38 @@ export class RegistryImportService {
       totalFiles: aggregate._count._all,
       totalSizeBytes,
       totalSizeMb: Number((totalSizeBytes / (1024 * 1024)).toFixed(1)),
+    };
+  }
+
+  async listRecords(
+    user: AuthenticatedUser,
+    query: ListRegistryRecordsQueryDto,
+  ): Promise<RegistryRecordListResponseDto> {
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 50;
+    const skip = (page - 1) * pageSize;
+    const where = this.buildRegistryRecordWhere(query);
+    const orderBy = this.buildRegistryRecordOrderBy(
+      query.sortBy ?? 'invoiceDate',
+      query.sortOrder ?? 'desc',
+    );
+
+    const [items, total] = await Promise.all([
+      this.registryImportRepository.listRecords({
+        userId: user.userId,
+        where,
+        skip,
+        take: pageSize,
+        orderBy,
+      }),
+      this.registryImportRepository.countRecords(user.userId, where),
+    ]);
+
+    return {
+      items: items.map((item) => this.toRegistryRecordItemDto(item)),
+      total,
+      page,
+      pageSize,
     };
   }
 
@@ -527,6 +582,107 @@ export class RegistryImportService {
     const isoDate = new Date(normalized);
 
     return Number.isNaN(isoDate.getTime()) ? null : isoDate;
+  }
+
+  private buildRegistryRecordWhere(
+    query: ListRegistryRecordsQueryDto,
+  ): Prisma.RegistryRecordWhereInput {
+    return {
+      sellerRegionCode: this.exactFilter(query.sellerRegionCode),
+      sellerDistrictCode: this.exactFilter(query.sellerDistrictCode),
+      sellerIpn: this.exactFilter(query.sellerIpn),
+      sellerName: this.containsFilter(query.sellerName),
+      buyerRegionCode: this.exactFilter(query.buyerRegionCode),
+      buyerDistrictCode: this.exactFilter(query.buyerDistrictCode),
+      buyerIpn: this.exactFilter(query.buyerIpn),
+      buyerName: this.containsFilter(query.buyerName),
+      itemDescription: this.containsFilter(query.itemDescription),
+      uktzedCode: this.exactFilter(query.uktzedCode),
+      unitName: this.containsFilter(query.unitName),
+      invoiceDate: this.buildInvoiceDateRange(
+        query.invoiceDateFrom,
+        query.invoiceDateTo,
+      ),
+    };
+  }
+
+  private buildRegistryRecordOrderBy(
+    sortBy: 'invoiceDate' | 'sellerName' | 'buyerName' | 'createdAt',
+    sortOrder: 'asc' | 'desc',
+  ): Prisma.RegistryRecordOrderByWithRelationInput {
+    switch (sortBy) {
+      case 'sellerName':
+        return { sellerName: sortOrder };
+      case 'buyerName':
+        return { buyerName: sortOrder };
+      case 'createdAt':
+        return { createdAt: sortOrder };
+      case 'invoiceDate':
+      default:
+        return { invoiceDate: sortOrder };
+    }
+  }
+
+  private exactFilter(
+    value: string | undefined,
+  ): Prisma.StringFilter | undefined {
+    const normalized = this.toOptionalString(value);
+
+    return normalized ? { equals: normalized } : undefined;
+  }
+
+  private containsFilter(
+    value: string | undefined,
+  ): Prisma.StringFilter | undefined {
+    const normalized = this.toOptionalString(value);
+
+    return normalized
+      ? {
+          contains: normalized,
+          mode: 'insensitive',
+        }
+      : undefined;
+  }
+
+  private buildInvoiceDateRange(
+    from: string | undefined,
+    to: string | undefined,
+  ): Prisma.DateTimeFilter | undefined {
+    const fromDate = this.toOptionalDate(from);
+    const toDate = this.toOptionalDate(to);
+
+    if (!fromDate && !toDate) {
+      return undefined;
+    }
+
+    return {
+      gte: fromDate ?? undefined,
+      lte: toDate ?? undefined,
+    };
+  }
+
+  private toRegistryRecordItemDto(
+    item: RegistryRecordListItem,
+  ): RegistryRecordItemDto {
+    return {
+      id: item.id,
+      importId: item.importId,
+      rowNumber: item.rowNumber,
+      sellerRegionCode: item.sellerRegionCode,
+      sellerDistrictCode: item.sellerDistrictCode,
+      sellerIpn: item.sellerIpn,
+      sellerName: item.sellerName,
+      buyerRegionCode: item.buyerRegionCode,
+      buyerDistrictCode: item.buyerDistrictCode,
+      buyerIpn: item.buyerIpn,
+      buyerName: item.buyerName,
+      invoiceDate: item.invoiceDate,
+      itemDescription: item.itemDescription,
+      uktzedCode: item.uktzedCode,
+      unitName: item.unitName,
+      unitPriceActual: item.unitPriceActual?.toString() ?? null,
+      createdAt: item.createdAt,
+    };
   }
 
   private toRegistryImportItemDto(
