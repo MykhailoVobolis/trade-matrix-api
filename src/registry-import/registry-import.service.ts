@@ -138,7 +138,7 @@ export class RegistryImportService {
       const failedImport = await this.registryImportRepository.createImport({
         userId: user.userId,
         originalFileName: file.originalname,
-        contentHash: this.buildFailedMetadataHash(contentHash),
+        contentHash,
         fileSizeBytes: BigInt(file.size),
         status: PrismaRegistryImportStatus.failed,
         errorMessage: 'This file has already been uploaded.',
@@ -184,10 +184,6 @@ export class RegistryImportService {
 
   private buildContentHash(buffer: Buffer): string {
     return createHash('sha256').update(buffer).digest('hex');
-  }
-
-  private buildFailedMetadataHash(contentHash: string): string {
-    return `${contentHash}:failed:${randomUUID()}`;
   }
 
   private async processWorkbookImport(

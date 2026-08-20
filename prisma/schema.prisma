@@ -144,8 +144,8 @@ model RegistryImport {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  @@unique([userId, contentHash])
   @@index([userId])
+  @@index([userId, contentHash])
   @@index([status])
   @@index([userId, status])
   @@index([userId, createdAt])
