@@ -17,6 +17,18 @@ import { RegistryImportStatsDto } from './dto/registry-import-stats.dto';
 import { UploadedRegistryImportFile } from './types/registry-import-file.type';
 import { RegistryImportRepository } from './registry-import.repository';
 
+type RegistryImportRecord = {
+  id: string;
+  originalFileName: string;
+  status: PrismaRegistryImportStatus;
+  fileSizeBytes: bigint;
+  rowCount: number;
+  errorMessage: string | null;
+  createdAt: Date;
+  startedAt: Date | null;
+  finishedAt: Date | null;
+};
+
 @Injectable()
 export class RegistryImportService {
   constructor(
@@ -42,20 +54,52 @@ export class RegistryImportService {
     );
   }
 
-  listImports(_user: AuthenticatedUser): Promise<RegistryImportItemDto[]> {
-    void this.registryImportRepository;
-    void _user;
-    throw new NotImplementedException(
-      'Registry import listing is not implemented yet.',
+  async listImports(user: AuthenticatedUser): Promise<RegistryImportItemDto[]> {
+    const imports = await this.registryImportRepository.listByUserId(
+      user.userId,
     );
+
+    return imports.map((item) => this.toRegistryImportItemDto(item));
   }
 
-  getStats(_user: AuthenticatedUser): Promise<RegistryImportStatsDto> {
-    void this.registryImportRepository;
-    void _user;
-    throw new NotImplementedException(
-      'Registry import stats are not implemented yet.',
-    );
+  async getStats(user: AuthenticatedUser): Promise<RegistryImportStatsDto> {
+    const [
+      completedCount,
+      processingCount,
+      queuedCount,
+      failedCount,
+      aggregate,
+    ] = await Promise.all([
+      this.registryImportRepository.countByUserIdAndStatus(
+        user.userId,
+        PrismaRegistryImportStatus.completed,
+      ),
+      this.registryImportRepository.countByUserIdAndStatus(
+        user.userId,
+        PrismaRegistryImportStatus.processing,
+      ),
+      this.registryImportRepository.countByUserIdAndStatus(
+        user.userId,
+        PrismaRegistryImportStatus.queued,
+      ),
+      this.registryImportRepository.countByUserIdAndStatus(
+        user.userId,
+        PrismaRegistryImportStatus.failed,
+      ),
+      this.registryImportRepository.aggregateSizeByUserId(user.userId),
+    ]);
+
+    const totalSizeBytes = Number(aggregate._sum.fileSizeBytes ?? 0n);
+
+    return {
+      completedCount,
+      processingCount,
+      queuedCount,
+      failedCount,
+      totalFiles: aggregate._count._all,
+      totalSizeBytes,
+      totalSizeMb: Number((totalSizeBytes / (1024 * 1024)).toFixed(1)),
+    };
   }
 
   deleteImport(
@@ -133,17 +177,9 @@ export class RegistryImportService {
     return `${contentHash}:failed:${randomUUID()}`;
   }
 
-  private toRegistryImportItemDto(importRecord: {
-    id: string;
-    originalFileName: string;
-    status: PrismaRegistryImportStatus;
-    fileSizeBytes: bigint;
-    rowCount: number;
-    errorMessage: string | null;
-    createdAt: Date;
-    startedAt: Date | null;
-    finishedAt: Date | null;
-  }): RegistryImportItemDto {
+  private toRegistryImportItemDto(
+    importRecord: RegistryImportRecord,
+  ): RegistryImportItemDto {
     const sizeBytes = Number(importRecord.fileSizeBytes);
 
     return {

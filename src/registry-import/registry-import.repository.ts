@@ -32,4 +32,68 @@ export class RegistryImportRepository {
       data,
     });
   }
+
+  listByUserId(userId: string) {
+    return this.prisma.registryImport.findMany({
+      where: { userId },
+      orderBy: {
+        createdAt: 'desc',
+      },
+    });
+  }
+
+  countByUserIdAndStatus(userId: string, status: RegistryImportStatus) {
+    return this.prisma.registryImport.count({
+      where: {
+        userId,
+        status,
+      },
+    });
+  }
+
+  aggregateSizeByUserId(userId: string) {
+    return this.prisma.registryImport.aggregate({
+      where: { userId },
+      _sum: {
+        fileSizeBytes: true,
+      },
+      _count: {
+        _all: true,
+      },
+    });
+  }
+
+  markProcessing(importId: string) {
+    return this.prisma.registryImport.update({
+      where: { id: importId },
+      data: {
+        status: RegistryImportStatus.processing,
+        startedAt: new Date(),
+        errorMessage: null,
+      },
+    });
+  }
+
+  markCompleted(importId: string, rowCount: number) {
+    return this.prisma.registryImport.update({
+      where: { id: importId },
+      data: {
+        status: RegistryImportStatus.completed,
+        rowCount,
+        finishedAt: new Date(),
+        errorMessage: null,
+      },
+    });
+  }
+
+  markFailed(importId: string, errorMessage: string) {
+    return this.prisma.registryImport.update({
+      where: { id: importId },
+      data: {
+        status: RegistryImportStatus.failed,
+        finishedAt: new Date(),
+        errorMessage,
+      },
+    });
+  }
 }
