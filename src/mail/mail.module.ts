@@ -3,6 +3,14 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MailService } from './mail.service';
 
+function parseBooleanEnv(value: string | boolean | undefined): boolean {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+
+  return value === 'true';
+}
+
 @Module({
   imports: [
     ConfigModule,
@@ -11,7 +19,9 @@ import { MailService } from './mail.service';
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => {
         const port = configService.get<number>('MAIL_PORT', 1025);
-        const secure = configService.get<boolean>('MAIL_SECURE', false);
+        const secure = parseBooleanEnv(
+          configService.get<string | boolean>('MAIL_SECURE', false),
+        );
         const user = configService.get<string>('MAIL_USER');
         const pass = configService.get<string>('MAIL_PASSWORD');
 

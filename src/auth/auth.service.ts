@@ -201,7 +201,7 @@ export class AuthService {
   async verifyEmail(
     dto: VerifyEmailDto,
     context: AuthRequestContext,
-  ): Promise<AuthTokensResult | TwoFactorRequiredResult> {
+  ): Promise<AuthTokensResult> {
     const normalizedEmail = this.normalizeEmail(dto.email);
     const user = await this.authRepository.findAuthUserByEmail(normalizedEmail);
 
@@ -250,7 +250,15 @@ export class AuthService {
       await this.authRepository.markEmailAsVerified(user.id),
     );
 
-    return this.completePrimaryAuthentication(verifiedUser, context);
+    return this.issueAuthResponse(
+      {
+        sub: verifiedUser.id,
+        email: verifiedUser.email,
+        sessionId: randomUUID(),
+      },
+      context,
+      'Email verified successfully.',
+    );
   }
 
   async forgotPassword(dto: ForgotPasswordDto): Promise<MessageResponseDto> {
@@ -356,10 +364,7 @@ export class AuthService {
       user.userId,
       await this.hashSecret(dto.newPassword),
     );
-    await this.authRepository.deleteOtherSessionsByUserId(
-      user.userId,
-      this.getSessionId(user),
-    );
+    await this.authRepository.deleteSessionsByUserId(user.userId);
 
     return {
       message: 'Password changed successfully.',
@@ -666,7 +671,15 @@ export class AuthService {
       avatarUrl: googleUser.avatarUrl,
     });
 
-    return this.completePrimaryAuthentication(createdUser, context);
+    return this.issueAuthResponse(
+      {
+        sub: createdUser.id,
+        email: createdUser.email,
+        sessionId: randomUUID(),
+      },
+      context,
+      'User authenticated successfully.',
+    );
   }
 
   async refresh(refreshToken: string): Promise<AuthTokensResult> {

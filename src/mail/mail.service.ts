@@ -24,7 +24,8 @@ export class MailService {
         padding: 20px;
         border: 1px solid #eee;
         border-radius: 8px;
-        background-color: #f9f9f9;
+        background-color: #dbeafe;
+        color: #0f274d;
         width: fit-content;
         margin: 20px auto;
       ">
@@ -54,7 +55,8 @@ export class MailService {
         padding: 20px;
         border: 1px solid #eee;
         border-radius: 8px;
-        background-color: #f9f9f9;
+        background-color: #dbeafe;
+        color: #0f274d;
         width: fit-content;
         margin: 20px auto;
       ">
@@ -84,7 +86,8 @@ export class MailService {
         padding: 20px;
         border: 1px solid #eee;
         border-radius: 8px;
-        background-color: #f9f9f9;
+        background-color: #dbeafe;
+        color: #0f274d;
         width: fit-content;
         margin: 20px auto;
       ">

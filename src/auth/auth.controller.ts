@@ -98,7 +98,7 @@ export class AuthController {
     @Body() dto: VerifyEmailDto,
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
-  ): Promise<AuthResponseDto | TwoFactorRequiredResponseDto> {
+  ): Promise<AuthResponseDto> {
     const resolvedClientIp = this.resolveClientIp(req);
     this.logAuthClientIp('register_verify', req, resolvedClientIp);
 
@@ -106,11 +106,6 @@ export class AuthController {
       userAgent: req.get('user-agent') ?? undefined,
       ipAddress: resolvedClientIp,
     });
-
-    if (this.isTwoFactorRequired(authResult)) {
-      this.setTwoFactorTokenCookie(res, authResult.twoFactorToken);
-      return authResult;
-    }
 
     this.setRefreshTokenCookie(res, authResult.refreshToken);
 
@@ -149,11 +144,16 @@ export class AuthController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Change password for the current user' })
   @ApiOkResponse({ type: MessageResponseDto })
-  changePassword(
+  async changePassword(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: ChangePasswordDto,
+    @Res({ passthrough: true }) res: Response,
   ): Promise<MessageResponseDto> {
-    return this.authService.changePassword(user, dto);
+    const result = await this.authService.changePassword(user, dto);
+
+    this.clearRefreshTokenCookie(res);
+
+    return result;
   }
 
   @Get('2fa/settings')
