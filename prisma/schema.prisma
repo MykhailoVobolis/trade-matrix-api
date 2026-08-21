@@ -21,6 +21,13 @@ enum TwoFactorMethod {
   totp
 }
 
+enum RegistryImportStatus {
+  queued
+  processing
+  completed
+  failed
+}
+
 model User {
   id           String       @id @default(cuid())
   email        String       @unique
@@ -45,6 +52,8 @@ model User {
   avatarPublicId           String?
   passwordHash             String?
   passwordResets           PasswordReset[]
+  registryImports          RegistryImport[]
+  registryRecords          RegistryRecord[]
   sessions                 Session[]
   twoFactorChallenges      TwoFactorChallenge[]
 
@@ -116,4 +125,90 @@ model Session {
   @@index([userId])
   @@index([expiresAt])
   @@index([revokedAt])
+}
+
+model RegistryImport {
+  id               String               @id @default(cuid())
+  userId           String
+  user             User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  originalFileName String
+  contentHash      String
+  fileSizeBytes    BigInt
+  status           RegistryImportStatus @default(queued)
+  rowCount         Int                  @default(0)
+  errorMessage     String?              @db.Text
+  startedAt        DateTime?            @map("started_at")
+  finishedAt       DateTime?            @map("finished_at")
+  records          RegistryRecord[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([userId])
+  @@index([userId, contentHash])
+  @@index([status])
+  @@index([userId, status])
+  @@index([userId, createdAt])
+}
+
+model RegistryRecord {
+  id       String @id @default(cuid())
+  userId   String
+  importId String
+  user     User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  import   RegistryImport @relation(fields: [importId], references: [id], onDelete: Cascade)
+
+  rowNumber             Int      @map("row_number")
+  sellerRegionCode      String?  @map("seller_region_code")
+  sellerDistrictCode    String?  @map("seller_district_code")
+  sellerTaxNumber       String?  @map("seller_tax_number")
+  sellerIpn             String?  @map("seller_ipn")
+  sellerName            String?  @map("seller_name") @db.Text
+  sellerStatus          String?  @map("seller_status")
+  buyerRegionCode       String?  @map("buyer_region_code")
+  buyerDistrictCode     String?  @map("buyer_district_code")
+  buyerTaxNumber        String?  @map("buyer_tax_number")
+  buyerIpn              String?  @map("buyer_ipn")
+  buyerName             String?  @map("buyer_name") @db.Text
+  buyerStatus           String?  @map("buyer_status")
+  registrationNumber    String?  @map("registration_number")
+  invoiceNumber         String?  @map("invoice_number")
+  invoiceDate           DateTime? @map("invoice_date")
+  registrationDate      DateTime? @map("registration_date")
+  erpnStatus            String?  @map("erpn_status")
+  isExcluded            Boolean? @map("is_excluded")
+  totalAmountPayable    Decimal? @map("total_amount_payable") @db.Decimal(18, 2)
+  totalVatAmount        Decimal? @map("total_vat_amount") @db.Decimal(18, 2)
+  supplyAmount20        Decimal? @map("supply_amount_20") @db.Decimal(18, 2)
+  supplyAmount14        Decimal? @map("supply_amount_14") @db.Decimal(18, 2)
+  supplyAmount7         Decimal? @map("supply_amount_7") @db.Decimal(18, 2)
+  adjustmentCount       Int?     @map("adjustment_count")
+  adjustmentAmount      Decimal? @map("adjustment_amount") @db.Decimal(18, 2)
+  unitPriceDeclared     Decimal? @map("unit_price_declared") @db.Decimal(18, 2)
+  itemDescription       String?  @map("item_description") @db.Text
+  uktzedCode            String?  @map("uktzed_code")
+  dkppCode              String?  @map("dkpp_code")
+  unitName              String?  @map("unit_name")
+  quantity              Decimal? @map("quantity") @db.Decimal(18, 3)
+  unitPriceActual       Decimal? @map("unit_price_actual") @db.Decimal(18, 2)
+  supplyAmountWithoutVat Decimal? @map("supply_amount_without_vat") @db.Decimal(18, 2)
+  vatAmount             Decimal? @map("vat_amount") @db.Decimal(18, 2)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([userId])
+  @@index([importId])
+  @@index([userId, sellerIpn])
+  @@index([userId, sellerName])
+  @@index([userId, buyerIpn])
+  @@index([userId, buyerName])
+  @@index([userId, invoiceDate])
+  @@index([userId, totalAmountPayable])
+  @@index([userId, uktzedCode])
+  @@index([userId, unitPriceActual])
+  @@index([userId, sellerRegionCode])
+  @@index([userId, buyerRegionCode])
+  @@index([userId, sellerDistrictCode])
+  @@index([userId, buyerDistrictCode])
 }
