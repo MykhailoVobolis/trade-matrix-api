@@ -1,11 +1,16 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { ANALYTICS_SPECIAL_TAX_IDENTITY_NAMES } from './constants/overview.constants';
+import {
+  ANALYTICS_REGION_DICTIONARY,
+  ANALYTICS_SPECIAL_TAX_IDENTITY_NAMES,
+  ANALYTICS_UNKNOWN_REGION_NAME,
+} from './constants/overview.constants';
 import { OverviewBaseQueryDto } from './dto/overview-base-query.dto';
 import type {
   AnalyticsBaseScope,
   AnalyticsCompanyIdentity,
+  AnalyticsFilterOptionDimension,
   AnalyticsKpiTotals,
   AnalyticsMarketEntity,
   AnalyticsMarketRegion,
@@ -22,6 +27,40 @@ import type {
 export class OverviewRepository {
   constructor(private readonly prisma: PrismaService) {}
 
+  resolveRegionCode(code: string | null | undefined): string | null {
+    const normalized = this.normalizeText(code);
+
+    if (!normalized) {
+      return null;
+    }
+
+    if (normalized === '0') {
+      return normalized;
+    }
+
+    const compact = normalized.replaceAll(' ', '');
+
+    if (!/^\d+$/u.test(compact)) {
+      return normalized;
+    }
+
+    return String(Number(compact));
+  }
+
+  resolveRegionName(code: string | null | undefined): string | null {
+    const regionCode = this.resolveRegionCode(code);
+
+    if (!regionCode) {
+      return null;
+    }
+
+    return (
+      ANALYTICS_REGION_DICTIONARY[
+        regionCode as keyof typeof ANALYTICS_REGION_DICTIONARY
+      ] ?? ANALYTICS_UNKNOWN_REGION_NAME
+    );
+  }
+
   createBaseScope(
     userId: string,
     query: OverviewBaseQueryDto,
@@ -35,7 +74,7 @@ export class OverviewRepository {
       filters: {
         uktzedPrefixes: this.normalizeUktzedPrefixes(query.uktzed),
         normalizedProducts: this.normalizeProducts(query.products),
-        buyerRegionCodes: this.normalizeStringValues(query.buyerRegionCodes),
+        buyerRegionCodes: this.normalizeRegionCodes(query.buyerRegionCodes),
         buyerTaxNumbers: this.normalizeTaxNumbers(query.buyerTaxNumbers),
         supplierTaxNumbers: this.normalizeTaxNumbers(query.supplierTaxNumbers),
       },
@@ -396,12 +435,34 @@ export class OverviewRepository {
     `);
 
     return rows.map((row) => ({
-      regionCode: row.regionCode,
-      regionName: null,
+      regionCode: this.resolveRegionCode(row.regionCode),
+      regionName: this.resolveRegionName(row.regionCode),
       amount: Number(row.amount ?? 0),
       share: Number(row.share ?? 0),
       activeBuyers: Number(row.activeBuyers ?? 0),
     }));
+  }
+
+  async getFilterOptions(
+    scope: AnalyticsBaseScope,
+    dimension: AnalyticsFilterOptionDimension,
+    options: {
+      search?: string;
+      page: number;
+      limit: number;
+    },
+  ): Promise<{
+    items: Array<{ value: string; label: string | null }>;
+    total: number;
+  }> {
+    if (dimension === 'buyerRegions') {
+      return this.getBuyerRegionFilterOptions(scope, options);
+    }
+
+    return {
+      items: [],
+      total: 0,
+    };
   }
 
   buildSupplierIdentity(
@@ -472,6 +533,12 @@ export class OverviewRepository {
   private normalizeTaxNumbers(values?: string[]): string[] {
     return this.normalizeStringValues(values)
       .map((value) => this.normalizeTaxNumber(value))
+      .filter((value): value is string => value !== null);
+  }
+
+  private normalizeRegionCodes(values?: string[]): string[] {
+    return this.normalizeStringValues(values)
+      .map((value) => this.resolveRegionCode(value))
       .filter((value): value is string => value !== null);
   }
 
@@ -675,8 +742,8 @@ export class OverviewRepository {
     }
 
     return {
-      regionCode: row.regionCode,
-      regionName: null,
+      regionCode: this.resolveRegionCode(row.regionCode),
+      regionName: this.resolveRegionName(row.regionCode),
       amount: Number(row.amount ?? 0),
       share: Number(row.share ?? 0),
     };
@@ -790,6 +857,74 @@ export class OverviewRepository {
     `);
 
     return Number(row?.share ?? 0);
+  }
+
+  private async getBuyerRegionFilterOptions(
+    scope: AnalyticsBaseScope,
+    options: {
+      search?: string;
+      page: number;
+      limit: number;
+    },
+  ): Promise<{
+    items: Array<{ value: string; label: string | null }>;
+    total: number;
+  }> {
+    const whereSql = this.buildBaseScopeSql(scope);
+    const search = this.normalizeText(options.search)?.toLowerCase() ?? null;
+    const offset = (options.page - 1) * options.limit;
+
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        regionCode: string | null;
+      }>
+    >(Prisma.sql`
+      WITH grouped AS (
+        SELECT DISTINCT NULLIF(BTRIM(record."buyer_region_code"), '') AS region_code
+        FROM "RegistryRecord" AS record
+        WHERE ${whereSql}
+          AND NULLIF(BTRIM(record."buyer_region_code"), '') IS NOT NULL
+      )
+      SELECT grouped.region_code AS "regionCode"
+      FROM grouped
+      ORDER BY grouped.region_code ASC
+    `);
+
+    const filtered = rows
+      .map((row) => {
+        const value = this.resolveRegionCode(row.regionCode);
+        const label = this.resolveRegionName(row.regionCode);
+
+        return value
+          ? {
+              value,
+              label,
+            }
+          : null;
+      })
+      .filter(
+        (
+          item,
+        ): item is {
+          value: string;
+          label: string | null;
+        } => item !== null,
+      )
+      .filter((item) => {
+        if (!search) {
+          return true;
+        }
+
+        return (
+          item.value.toLowerCase().includes(search) ||
+          item.label?.toLowerCase().includes(search) === true
+        );
+      });
+
+    return {
+      items: filtered.slice(offset, offset + options.limit),
+      total: filtered.length,
+    };
   }
 
   private buildTopEntityQuery(

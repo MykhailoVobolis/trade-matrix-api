@@ -55,7 +55,7 @@ export class OverviewController {
   getFilterOptions(
     @CurrentUser() user: AuthenticatedUser,
     @Query() query: FilterOptionsQueryDto,
-  ): FilterOptionsResponseDto {
+  ): Promise<FilterOptionsResponseDto> {
     return this.overviewService.getFilterOptions(user, query);
   }
 

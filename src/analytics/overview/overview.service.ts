@@ -114,7 +114,7 @@ export class OverviewService {
           comparisonTrend,
           resolved.timeGrain,
         ),
-        marketStructure,
+        marketStructure: this.buildMarketStructure(marketStructure),
         topBuyers: this.buildTopEntities(topBuyers, previousTopBuyers),
         topSuppliers: this.buildTopEntities(topSuppliers, previousTopSuppliers),
         topProducts: this.buildTopProducts(topProducts, previousTopProducts),
@@ -227,7 +227,9 @@ export class OverviewService {
 
       return {
         regionCode: item.regionCode,
-        regionName: item.regionName,
+        regionName:
+          item.regionName ??
+          this.overviewRepository.resolveRegionName(item.regionCode),
         amount: item.amount,
         share: item.share,
         activeBuyers: item.activeBuyers,
@@ -238,6 +240,27 @@ export class OverviewService {
         ),
       };
     });
+  }
+
+  private buildMarketStructure(
+    marketStructure: AnalyticsMarketStructure,
+  ): AnalyticsMarketStructure {
+    return {
+      ...marketStructure,
+      topBuyerRegion: marketStructure.topBuyerRegion
+        ? {
+            ...marketStructure.topBuyerRegion,
+            regionCode: this.overviewRepository.resolveRegionCode(
+              marketStructure.topBuyerRegion.regionCode,
+            ),
+            regionName:
+              marketStructure.topBuyerRegion.regionName ??
+              this.overviewRepository.resolveRegionName(
+                marketStructure.topBuyerRegion.regionCode,
+              ),
+          }
+        : null,
+    };
   }
 
   private buildEmptyMarketStructure(): AnalyticsMarketStructure {
@@ -251,20 +274,29 @@ export class OverviewService {
     };
   }
 
-  getFilterOptions(
+  async getFilterOptions(
     user: AuthenticatedUser,
     query: FilterOptionsQueryDto,
-  ): FilterOptionsResponseDto {
+  ): Promise<FilterOptionsResponseDto> {
     const scope = this.overviewRepository.createBaseScope(user.userId, query);
-    const where = this.overviewRepository.buildBaseWhere(scope);
-    void where;
+    const page = query.page ?? ANALYTICS_DEFAULT_FILTER_OPTIONS_PAGE;
+    const limit = query.limit ?? ANALYTICS_DEFAULT_FILTER_OPTIONS_LIMIT;
+    const result = await this.overviewRepository.getFilterOptions(
+      scope,
+      query.dimension,
+      {
+        search: query.search,
+        page,
+        limit,
+      },
+    );
 
     return {
       dimension: query.dimension,
-      items: [],
-      total: 0,
-      page: query.page ?? ANALYTICS_DEFAULT_FILTER_OPTIONS_PAGE,
-      limit: query.limit ?? ANALYTICS_DEFAULT_FILTER_OPTIONS_LIMIT,
+      items: result.items,
+      total: result.total,
+      page,
+      limit,
     };
   }
 
