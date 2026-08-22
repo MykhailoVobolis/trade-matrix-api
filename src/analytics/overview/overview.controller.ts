@@ -1,18 +1,26 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Query,
+  Res,
+  StreamableFile,
+  UseGuards,
+} from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiOkResponse,
   ApiOperation,
+  ApiProduces,
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { CurrentUser } from '../../auth/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import type { AuthenticatedUser } from '../../auth/types/authenticated-user.type';
 import { FilterOptionsQueryDto } from './dto/filter-options-query.dto';
 import { FilterOptionsResponseDto } from './dto/filter-options-response.dto';
 import { OverviewExportQueryDto } from './dto/overview-export-query.dto';
-import { OverviewExportResponseDto } from './dto/overview-export-response.dto';
 import { OverviewQueryDto } from './dto/overview-query.dto';
 import { OverviewResponseDto } from './dto/overview-response.dto';
 import { OverviewTableQueryDto } from './dto/overview-table-query.dto';
@@ -61,12 +69,30 @@ export class OverviewController {
 
   @Get('overview/export')
   @ApiOperation({ summary: 'Export overview analytics report' })
-  @ApiOkResponse({ type: OverviewExportResponseDto })
+  @ApiProduces(
+    'text/csv',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  )
+  @ApiOkResponse({
+    schema: {
+      type: 'string',
+      format: 'binary',
+    },
+  })
   @ApiUnauthorizedResponse({ description: 'Missing or invalid access token' })
-  exportOverview(
+  async exportOverview(
     @CurrentUser() user: AuthenticatedUser,
     @Query() query: OverviewExportQueryDto,
-  ): OverviewExportResponseDto {
-    return this.overviewService.exportOverview(user, query);
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    const file = await this.overviewService.exportOverview(user, query);
+
+    res.setHeader('Content-Type', file.mimeType);
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${file.fileName}"`,
+    );
+
+    return new StreamableFile(file.buffer);
   }
 }

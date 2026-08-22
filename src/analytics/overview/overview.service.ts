@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
+import { utils, write } from 'xlsx';
 import type { AuthenticatedUser } from '../../auth/types/authenticated-user.type';
 import {
   ANALYTICS_DEFAULT_FILTER_OPTIONS_LIMIT,
@@ -11,7 +12,6 @@ import {
 import { FilterOptionsQueryDto } from './dto/filter-options-query.dto';
 import { FilterOptionsResponseDto } from './dto/filter-options-response.dto';
 import { OverviewExportQueryDto } from './dto/overview-export-query.dto';
-import { OverviewExportResponseDto } from './dto/overview-export-response.dto';
 import { OverviewQueryDto } from './dto/overview-query.dto';
 import {
   OverviewComparisonDto,
@@ -42,6 +42,12 @@ type ResolvedOverviewContext = {
   comparisonMode: AnalyticsComparisonMode;
   comparisonRange: ResolvedDateRange | null;
   timeGrain: AnalyticsTimeGrain;
+};
+
+type OverviewExportFile = {
+  buffer: Buffer;
+  fileName: string;
+  mimeType: string;
 };
 
 @Injectable()
@@ -510,18 +516,59 @@ export class OverviewService {
     };
   }
 
-  exportOverview(
+  async exportOverview(
     user: AuthenticatedUser,
     query: OverviewExportQueryDto,
-  ): OverviewExportResponseDto {
-    this.resolveOverviewContext(query);
+  ): Promise<OverviewExportFile> {
+    const resolved = this.resolveOverviewContext(query);
     const scope = this.overviewRepository.createBaseScope(user.userId, query);
-    const where = this.overviewRepository.buildBaseWhere(scope);
-    void where;
+    const format = query.format ?? 'csv';
+    const sortBy = ANALYTICS_DEFAULT_TABLE_SORT_FIELD;
+    const sortDirection = ANALYTICS_DEFAULT_TABLE_SORT_DIRECTION;
+    const items = await this.overviewRepository.getOverviewTableExport(scope, {
+      timeGrain: resolved.timeGrain,
+      sortBy,
+      sortDirection,
+    });
+    const rows = items.map((item) => ({
+      Period: this.formatTablePeriod(item.periodStart, resolved.timeGrain),
+      'Buyer Region Code': item.buyerRegionCode,
+      'Buyer Region Name': this.overviewRepository.resolveRegionName(
+        item.buyerRegionCode,
+      ),
+      'Buyer Tax Number': item.buyerTaxNumber,
+      'Buyer Name': item.buyerName,
+      'Supplier Tax Number': item.supplierTaxNumber,
+      'Supplier Name': item.supplierName,
+      Product: item.product,
+      UKTZED: item.uktzed,
+      Unit: item.unit,
+      Quantity: item.quantity,
+      'Sales With VAT': item.salesWithVat,
+      'Purchases With VAT': item.purchasesWithVat,
+      'Market Share': item.marketShare,
+    }));
+    const fileName = this.buildOverviewExportFileName(query, format);
+
+    if (format === 'xlsx') {
+      const workbook = utils.book_new();
+      const worksheet = utils.json_to_sheet(rows);
+      utils.book_append_sheet(workbook, worksheet, 'Overview');
+
+      return {
+        buffer: write(workbook, { type: 'buffer', bookType: 'xlsx' }) as Buffer,
+        fileName,
+        mimeType:
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      };
+    }
+
+    const worksheet = utils.json_to_sheet(rows);
 
     return {
-      format: query.format ?? 'csv',
-      message: 'Overview export scaffold is ready.',
+      buffer: Buffer.from(utils.sheet_to_csv(worksheet), 'utf-8'),
+      fileName,
+      mimeType: 'text/csv; charset=utf-8',
     };
   }
 
@@ -792,5 +839,12 @@ export class OverviewService {
       case 'QUARTER':
         return `${year}-Q${Math.floor((month - 1) / 3) + 1}`;
     }
+  }
+
+  private buildOverviewExportFileName(
+    query: Pick<OverviewExportQueryDto, 'dateFrom' | 'dateTo'>,
+    format: 'csv' | 'xlsx',
+  ): string {
+    return `overview-report-${query.dateFrom}-${query.dateTo}.${format}`;
   }
 }

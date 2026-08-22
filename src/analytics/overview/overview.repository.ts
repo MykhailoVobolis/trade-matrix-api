@@ -11,6 +11,7 @@ import type {
   AnalyticsBaseScope,
   AnalyticsCompanyIdentity,
   AnalyticsFilterOptionDimension,
+  AnalyticsOverviewTableItem,
   AnalyticsKpiTotals,
   AnalyticsMarketEntity,
   AnalyticsMarketRegion,
@@ -589,22 +590,121 @@ export class OverviewRepository {
 
     return {
       items: rows.map((row) => ({
-        periodStart: row.periodStart,
-        buyerRegionCode: this.resolveRegionCode(row.buyerRegionCode),
-        buyerTaxNumber: row.buyerTaxNumber,
-        buyerName: row.buyerName,
-        supplierTaxNumber: row.supplierTaxNumber,
-        supplierName: row.supplierName,
-        product: row.product,
-        uktzed: row.uktzed,
-        unit: row.unit,
-        quantity: row.quantity === null ? null : Number(row.quantity),
-        salesWithVat: Number(row.salesWithVat ?? 0),
-        purchasesWithVat: Number(row.purchasesWithVat ?? 0),
-        marketShare: Number(row.marketShare ?? 0),
+        ...this.mapOverviewTableRow(row),
       })),
       total: Number(rows[0]?.totalCount ?? 0),
     };
+  }
+
+  async getOverviewTableExport(
+    scope: AnalyticsBaseScope,
+    options: {
+      timeGrain: AnalyticsTimeGrain;
+      sortBy: AnalyticsTableSortField;
+      sortDirection: 'asc' | 'desc';
+    },
+  ): Promise<AnalyticsOverviewTableItem[]> {
+    const buyerIdentitySql = this.buildCompanyIdentitySql(
+      'record."buyer_tax_number"',
+      'record."buyer_name"',
+    );
+    const supplierIdentitySql = this.buildCompanyIdentitySql(
+      'record."seller_tax_number"',
+      'record."seller_name"',
+    );
+    const amountWithVatSql = this.amountWithVatSql();
+    const bucketExpressionSql = this.buildBucketExpressionSql(
+      options.timeGrain,
+    );
+    const normalizedProductSql = this.buildNormalizedProductSql();
+    const normalizedUktzedSql = this.buildNormalizedUktzedSql();
+    const normalizedUnitSql = this.buildNormalizedTextSql('record."unit_name"');
+    const whereSql = this.buildBaseScopeSql(scope);
+    const orderBySql = this.buildOverviewTableOrderBySql(
+      options.sortBy,
+      options.sortDirection,
+    );
+
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        periodStart: Date;
+        buyerRegionCode: string | null;
+        buyerTaxNumber: string | null;
+        buyerName: string | null;
+        supplierTaxNumber: string | null;
+        supplierName: string | null;
+        product: string | null;
+        uktzed: string | null;
+        unit: string | null;
+        quantity: Prisma.Decimal | null;
+        salesWithVat: Prisma.Decimal | null;
+        purchasesWithVat: Prisma.Decimal | null;
+        marketShare: Prisma.Decimal | null;
+      }>
+    >(Prisma.sql`
+      WITH grouped AS (
+        SELECT
+          ${bucketExpressionSql} AS period_start,
+          NULLIF(BTRIM(record."buyer_region_code"), '') AS buyer_region_code,
+          ${buyerIdentitySql} AS buyer_tax_number,
+          MIN(NULLIF(BTRIM(record."buyer_name"), '')) AS buyer_name,
+          ${supplierIdentitySql} AS supplier_tax_number,
+          MIN(NULLIF(BTRIM(record."seller_name"), '')) AS supplier_name,
+          NULLIF(${normalizedProductSql}, '') AS product,
+          NULLIF(${normalizedUktzedSql}, '') AS uktzed,
+          NULLIF(${normalizedUnitSql}, '') AS unit,
+          SUM(COALESCE(record."quantity", 0)) AS quantity,
+          COALESCE(
+            SUM(
+              CASE
+                WHEN ${supplierIdentitySql} IS NOT NULL THEN ${amountWithVatSql}
+                ELSE 0
+              END
+            ),
+            0
+          ) AS sales_with_vat,
+          COALESCE(
+            SUM(
+              CASE
+                WHEN ${buyerIdentitySql} IS NOT NULL THEN ${amountWithVatSql}
+                ELSE 0
+              END
+            ),
+            0
+          ) AS purchases_with_vat
+        FROM "RegistryRecord" AS record
+        WHERE ${whereSql}
+        GROUP BY 1, 2, 3, 5, 7, 8, 9
+      ),
+      totals AS (
+        SELECT
+          COALESCE(SUM(grouped.sales_with_vat + grouped.purchases_with_vat), 0) AS total_market_amount
+        FROM grouped
+      )
+      SELECT
+        grouped.period_start AS "periodStart",
+        grouped.buyer_region_code AS "buyerRegionCode",
+        grouped.buyer_tax_number AS "buyerTaxNumber",
+        grouped.buyer_name AS "buyerName",
+        grouped.supplier_tax_number AS "supplierTaxNumber",
+        grouped.supplier_name AS "supplierName",
+        grouped.product AS product,
+        grouped.uktzed AS uktzed,
+        grouped.unit AS unit,
+        grouped.quantity AS quantity,
+        grouped.sales_with_vat AS "salesWithVat",
+        grouped.purchases_with_vat AS "purchasesWithVat",
+        CASE
+          WHEN totals.total_market_amount = 0 THEN 0
+          ELSE (grouped.sales_with_vat + grouped.purchases_with_vat)
+            / totals.total_market_amount * 100
+        END AS "marketShare"
+      FROM grouped
+      CROSS JOIN totals
+      ORDER BY ${orderBySql}
+    `);
+
+    return rows.map((row) => this.mapOverviewTableRow(row));
   }
 
   buildSupplierIdentity(
@@ -1333,6 +1433,38 @@ export class OverviewRepository {
         label: string | null;
       } => item !== null,
     );
+  }
+
+  private mapOverviewTableRow(row: {
+    periodStart: Date;
+    buyerRegionCode: string | null;
+    buyerTaxNumber: string | null;
+    buyerName: string | null;
+    supplierTaxNumber: string | null;
+    supplierName: string | null;
+    product: string | null;
+    uktzed: string | null;
+    unit: string | null;
+    quantity: Prisma.Decimal | null;
+    salesWithVat: Prisma.Decimal | null;
+    purchasesWithVat: Prisma.Decimal | null;
+    marketShare: Prisma.Decimal | null;
+  }): AnalyticsOverviewTableItem {
+    return {
+      periodStart: row.periodStart,
+      buyerRegionCode: this.resolveRegionCode(row.buyerRegionCode),
+      buyerTaxNumber: row.buyerTaxNumber,
+      buyerName: row.buyerName,
+      supplierTaxNumber: row.supplierTaxNumber,
+      supplierName: row.supplierName,
+      product: row.product,
+      uktzed: row.uktzed,
+      unit: row.unit,
+      quantity: row.quantity === null ? null : Number(row.quantity),
+      salesWithVat: Number(row.salesWithVat ?? 0),
+      purchasesWithVat: Number(row.purchasesWithVat ?? 0),
+      marketShare: Number(row.marketShare ?? 0),
+    };
   }
 
   private resolveRegionCodeCaseSql(column: string): Prisma.Sql {
