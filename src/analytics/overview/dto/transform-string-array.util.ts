@@ -9,13 +9,11 @@ export function transformStringArray({
 
   if (Array.isArray(value)) {
     return value
-      .flatMap((item) => String(item).split(','))
-      .map((item) => item.trim())
+      .map((item) => String(item).trim())
       .filter((item) => item.length > 0);
   }
 
-  return String(value)
-    .split(',')
-    .map((item) => item.trim())
-    .filter((item) => item.length > 0);
+  const normalized = String(value).trim();
+
+  return normalized.length > 0 ? [normalized] : undefined;
 }

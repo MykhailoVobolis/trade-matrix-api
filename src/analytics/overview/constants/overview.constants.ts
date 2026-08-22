@@ -28,6 +28,7 @@ export const ANALYTICS_TABLE_SORT_FIELDS = [
   'uktzed',
   'unit',
   'quantity',
+  'priceWithVat',
   'salesWithVat',
   'purchasesWithVat',
   'marketShare',
@@ -70,6 +71,7 @@ export const ANALYTICS_REGION_DICTIONARY = {
 } as const;
 
 export const ANALYTICS_UNKNOWN_REGION_NAME = 'Не визначено';
+export const ANALYTICS_UNKNOWN_REGION_CODE = 'unknown';
 
 export const ANALYTICS_DEFAULT_TABLE_PAGE = 1;
 export const ANALYTICS_DEFAULT_TABLE_LIMIT = 10;

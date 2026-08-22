@@ -4,6 +4,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import {
   ANALYTICS_REGION_DICTIONARY,
   ANALYTICS_SPECIAL_TAX_IDENTITY_NAMES,
+  ANALYTICS_UNKNOWN_REGION_CODE,
   ANALYTICS_UNKNOWN_REGION_NAME,
 } from './constants/overview.constants';
 import { OverviewBaseQueryDto } from './dto/overview-base-query.dto';
@@ -37,17 +38,17 @@ export class OverviewRepository {
       return null;
     }
 
-    if (normalized === '0') {
-      return normalized;
-    }
-
     const compact = normalized.replaceAll(' ', '');
 
     if (!/^\d+$/u.test(compact)) {
-      return normalized;
+      return ANALYTICS_UNKNOWN_REGION_CODE;
     }
 
-    return String(Number(compact));
+    const resolved = String(Number(compact));
+
+    return Object.hasOwn(ANALYTICS_REGION_DICTIONARY, resolved)
+      ? resolved
+      : ANALYTICS_UNKNOWN_REGION_CODE;
   }
 
   resolveRegionName(code: string | null | undefined): string | null {
@@ -75,8 +76,8 @@ export class OverviewRepository {
         to: this.toEndOfDayUtc(query.dateTo),
       },
       filters: {
-        uktzedPrefixes: this.normalizeUktzedPrefixes(query.uktzed),
-        normalizedProducts: this.normalizeProducts(query.products),
+        uktzedValues: this.normalizeUktzedValues(query.uktzed),
+        normalizedProducts: this.normalizeOutputTextValues(query.products),
         buyerRegionCodes: this.normalizeRegionCodes(query.buyerRegionCodes),
         buyerTaxNumbers: this.normalizeTaxNumbers(query.buyerTaxNumbers),
         supplierTaxNumbers: this.normalizeTaxNumbers(query.supplierTaxNumbers),
@@ -115,11 +116,9 @@ export class OverviewRepository {
       };
     }
 
-    if (scope.filters.uktzedPrefixes.length > 0) {
-      where.OR = scope.filters.uktzedPrefixes.map((prefix) => ({
-        uktzedCode: {
-          startsWith: prefix,
-        },
+    if (scope.filters.uktzedValues.length > 0) {
+      where.OR = scope.filters.uktzedValues.map((value) => ({
+        uktzedCode: value,
       }));
     }
 
@@ -183,7 +182,7 @@ export class OverviewRepository {
             WHEN ${supplierIdentitySql} IS NOT NULL
              AND record."buyer_region_code" IS NOT NULL
              AND BTRIM(record."buyer_region_code") <> ''
-            THEN BTRIM(record."buyer_region_code")
+            THEN ${this.buildResolvedRegionGroupSql('record."buyer_region_code"')}
             ELSE NULL
           END
         ) AS "salesRegions"
@@ -332,8 +331,8 @@ export class OverviewRepository {
       'record."seller_tax_number"',
       'record."seller_name"',
     );
-    const normalizedProductSql = this.buildNormalizedProductSql();
-    const normalizedUktzedSql = this.buildNormalizedUktzedSql();
+    const outputProductSql = this.buildOutputProductSql();
+    const outputUktzedSql = this.buildOutputUktzedSql();
     const amountWithVatSql = this.amountWithVatSql();
     const whereSql = this.buildBaseScopeSql(scope);
 
@@ -348,14 +347,14 @@ export class OverviewRepository {
     >(Prisma.sql`
       WITH grouped AS (
         SELECT
-          NULLIF(${normalizedProductSql}, '') AS product_id,
-          NULLIF(${normalizedProductSql}, '') AS name,
-          NULLIF(${normalizedUktzedSql}, '') AS uktzed,
+          NULLIF(${outputProductSql}, '') AS product_id,
+          NULLIF(${outputProductSql}, '') AS name,
+          NULLIF(${outputUktzedSql}, '') AS uktzed,
           SUM(${amountWithVatSql}) AS amount
         FROM "RegistryRecord" AS record
         WHERE ${whereSql}
           AND ${supplierIdentitySql} IS NOT NULL
-          AND NULLIF(${normalizedProductSql}, '') IS NOT NULL
+          AND NULLIF(${outputProductSql}, '') IS NOT NULL
         GROUP BY 1, 2, 3
       ),
       totals AS (
@@ -410,14 +409,14 @@ export class OverviewRepository {
     >(Prisma.sql`
       WITH grouped AS (
         SELECT
-          NULLIF(BTRIM(record."buyer_region_code"), '') AS region_code,
+          ${this.buildResolvedRegionGroupSql('record."buyer_region_code"')} AS region_code,
           SUM(${amountWithVatSql}) AS amount,
           COUNT(DISTINCT ${buyerIdentitySql}) AS active_buyers
         FROM "RegistryRecord" AS record
         WHERE ${whereSql}
           AND ${supplierIdentitySql} IS NOT NULL
           AND ${buyerIdentitySql} IS NOT NULL
-          AND NULLIF(BTRIM(record."buyer_region_code"), '') IS NOT NULL
+          AND ${this.buildResolvedRegionGroupSql('record."buyer_region_code"')} IS NOT NULL
         GROUP BY 1
       ),
       totals AS (
@@ -494,8 +493,8 @@ export class OverviewRepository {
     const bucketExpressionSql = this.buildBucketExpressionSql(
       options.timeGrain,
     );
-    const normalizedProductSql = this.buildNormalizedProductSql();
-    const normalizedUktzedSql = this.buildNormalizedUktzedSql();
+    const outputProductSql = this.buildOutputProductSql();
+    const outputUktzedSql = this.buildOutputUktzedSql();
     const normalizedUnitSql = this.buildNormalizedTextSql('record."unit_name"');
     const whereSql = this.buildBaseScopeSql(scope);
     const offset = (options.page - 1) * options.limit;
@@ -516,6 +515,7 @@ export class OverviewRepository {
         uktzed: string | null;
         unit: string | null;
         quantity: Prisma.Decimal | null;
+        priceWithVat: Prisma.Decimal | null;
         salesWithVat: Prisma.Decimal | null;
         purchasesWithVat: Prisma.Decimal | null;
         marketShare: Prisma.Decimal | null;
@@ -525,13 +525,13 @@ export class OverviewRepository {
       WITH grouped AS (
         SELECT
           ${bucketExpressionSql} AS period_start,
-          NULLIF(BTRIM(record."buyer_region_code"), '') AS buyer_region_code,
+          ${this.buildResolvedRegionGroupSql('record."buyer_region_code"')} AS buyer_region_code,
           ${buyerIdentitySql} AS buyer_tax_number,
           MIN(NULLIF(BTRIM(record."buyer_name"), '')) AS buyer_name,
           ${supplierIdentitySql} AS supplier_tax_number,
           MIN(NULLIF(BTRIM(record."seller_name"), '')) AS supplier_name,
-          NULLIF(${normalizedProductSql}, '') AS product,
-          NULLIF(${normalizedUktzedSql}, '') AS uktzed,
+          NULLIF(${outputProductSql}, '') AS product,
+          NULLIF(${outputUktzedSql}, '') AS uktzed,
           NULLIF(${normalizedUnitSql}, '') AS unit,
           SUM(COALESCE(record."quantity", 0)) AS quantity,
           COALESCE(
@@ -573,6 +573,12 @@ export class OverviewRepository {
         grouped.uktzed AS uktzed,
         grouped.unit AS unit,
         grouped.quantity AS quantity,
+        CASE
+          WHEN COALESCE(grouped.quantity, 0) = 0 THEN NULL
+          WHEN grouped.sales_with_vat <> 0 THEN grouped.sales_with_vat / grouped.quantity
+          WHEN grouped.purchases_with_vat <> 0 THEN grouped.purchases_with_vat / grouped.quantity
+          ELSE NULL
+        END AS "priceWithVat",
         grouped.sales_with_vat AS "salesWithVat",
         grouped.purchases_with_vat AS "purchasesWithVat",
         CASE
@@ -616,8 +622,8 @@ export class OverviewRepository {
     const bucketExpressionSql = this.buildBucketExpressionSql(
       options.timeGrain,
     );
-    const normalizedProductSql = this.buildNormalizedProductSql();
-    const normalizedUktzedSql = this.buildNormalizedUktzedSql();
+    const outputProductSql = this.buildOutputProductSql();
+    const outputUktzedSql = this.buildOutputUktzedSql();
     const normalizedUnitSql = this.buildNormalizedTextSql('record."unit_name"');
     const whereSql = this.buildBaseScopeSql(scope);
     const orderBySql = this.buildOverviewTableOrderBySql(
@@ -637,6 +643,7 @@ export class OverviewRepository {
         uktzed: string | null;
         unit: string | null;
         quantity: Prisma.Decimal | null;
+        priceWithVat: Prisma.Decimal | null;
         salesWithVat: Prisma.Decimal | null;
         purchasesWithVat: Prisma.Decimal | null;
         marketShare: Prisma.Decimal | null;
@@ -645,13 +652,13 @@ export class OverviewRepository {
       WITH grouped AS (
         SELECT
           ${bucketExpressionSql} AS period_start,
-          NULLIF(BTRIM(record."buyer_region_code"), '') AS buyer_region_code,
+          ${this.buildResolvedRegionGroupSql('record."buyer_region_code"')} AS buyer_region_code,
           ${buyerIdentitySql} AS buyer_tax_number,
           MIN(NULLIF(BTRIM(record."buyer_name"), '')) AS buyer_name,
           ${supplierIdentitySql} AS supplier_tax_number,
           MIN(NULLIF(BTRIM(record."seller_name"), '')) AS supplier_name,
-          NULLIF(${normalizedProductSql}, '') AS product,
-          NULLIF(${normalizedUktzedSql}, '') AS uktzed,
+          NULLIF(${outputProductSql}, '') AS product,
+          NULLIF(${outputUktzedSql}, '') AS uktzed,
           NULLIF(${normalizedUnitSql}, '') AS unit,
           SUM(COALESCE(record."quantity", 0)) AS quantity,
           COALESCE(
@@ -692,6 +699,12 @@ export class OverviewRepository {
         grouped.uktzed AS uktzed,
         grouped.unit AS unit,
         grouped.quantity AS quantity,
+        CASE
+          WHEN COALESCE(grouped.quantity, 0) = 0 THEN NULL
+          WHEN grouped.sales_with_vat <> 0 THEN grouped.sales_with_vat / grouped.quantity
+          WHEN grouped.purchases_with_vat <> 0 THEN grouped.purchases_with_vat / grouped.quantity
+          ELSE NULL
+        END AS "priceWithVat",
         grouped.sales_with_vat AS "salesWithVat",
         grouped.purchases_with_vat AS "purchasesWithVat",
         CASE
@@ -760,16 +773,14 @@ export class OverviewRepository {
     };
   }
 
-  private normalizeUktzedPrefixes(values?: string[]): string[] {
+  private normalizeUktzedValues(values?: string[]): string[] {
     return this.normalizeStringValues(values).map((value) =>
       value.replaceAll(' ', '').replace(/\.0+$/u, ''),
     );
   }
 
-  private normalizeProducts(values?: string[]): string[] {
-    return this.normalizeStringValues(values).map(
-      (value) => this.normalizeText(value) ?? value,
-    );
+  private normalizeOutputTextValues(values?: string[]): string[] {
+    return this.normalizePreservedStringValues(values);
   }
 
   private normalizeTaxNumbers(values?: string[]): string[] {
@@ -793,6 +804,20 @@ export class OverviewRepository {
       ...new Set(
         values
           .map((value) => this.normalizeText(value))
+          .filter((value): value is string => value !== null),
+      ),
+    ];
+  }
+
+  private normalizePreservedStringValues(values?: string[]): string[] {
+    if (!values || values.length === 0) {
+      return [];
+    }
+
+    return [
+      ...new Set(
+        values
+          .map((value) => this.normalizePreservedText(value))
           .filter((value): value is string => value !== null),
       ),
     ];
@@ -824,6 +849,18 @@ export class OverviewRepository {
     return normalized.length > 0 ? normalized : null;
   }
 
+  private normalizePreservedText(
+    value: string | null | undefined,
+  ): string | null {
+    if (!value) {
+      return null;
+    }
+
+    const normalized = value.normalize('NFC').trim();
+
+    return normalized.length > 0 ? normalized : null;
+  }
+
   private toStartOfDayUtc(date: string): Date {
     return new Date(`${date}T00:00:00.000Z`);
   }
@@ -843,48 +880,66 @@ export class OverviewRepository {
 
     if (scope.filters.buyerRegionCodes.length > 0) {
       conditions.push(
-        Prisma.sql`BTRIM(COALESCE(record."buyer_region_code", '')) IN (${Prisma.join(scope.filters.buyerRegionCodes)})`,
+        this.buildSqlEqualsAnyCondition(
+          this.buildResolvedRegionGroupSql('record."buyer_region_code"'),
+          scope.filters.buyerRegionCodes,
+        ),
       );
     }
 
     if (scope.filters.buyerTaxNumbers.length > 0) {
       conditions.push(
-        Prisma.sql`${this.buildCompanyIdentitySql(
-          'record."buyer_tax_number"',
-          'record."buyer_name"',
-        )} IN (${Prisma.join(scope.filters.buyerTaxNumbers)})`,
+        this.buildSqlEqualsAnyCondition(
+          this.buildCompanyIdentitySql(
+            'record."buyer_tax_number"',
+            'record."buyer_name"',
+          ),
+          scope.filters.buyerTaxNumbers,
+        ),
       );
     }
 
     if (scope.filters.supplierTaxNumbers.length > 0) {
       conditions.push(
-        Prisma.sql`${this.buildCompanyIdentitySql(
-          'record."seller_tax_number"',
-          'record."seller_name"',
-        )} IN (${Prisma.join(scope.filters.supplierTaxNumbers)})`,
+        this.buildSqlEqualsAnyCondition(
+          this.buildCompanyIdentitySql(
+            'record."seller_tax_number"',
+            'record."seller_name"',
+          ),
+          scope.filters.supplierTaxNumbers,
+        ),
       );
     }
 
-    if (scope.filters.uktzedPrefixes.length > 0) {
+    if (scope.filters.uktzedValues.length > 0) {
       conditions.push(
-        Prisma.sql`(${Prisma.join(
-          scope.filters.uktzedPrefixes.map((prefix) => {
-            const normalizedPrefix = `${prefix}%`;
-
-            return Prisma.sql`${this.buildNormalizedUktzedSql()} LIKE ${normalizedPrefix}`;
-          }),
-          ' OR ',
-        )})`,
+        this.buildSqlEqualsAnyCondition(
+          this.buildNormalizedUktzedSql(),
+          scope.filters.uktzedValues,
+        ),
       );
     }
 
     if (scope.filters.normalizedProducts.length > 0) {
       conditions.push(
-        Prisma.sql`${this.buildNormalizedProductSql()} IN (${Prisma.join(scope.filters.normalizedProducts)})`,
+        this.buildSqlEqualsAnyCondition(
+          this.buildOutputProductSql(),
+          scope.filters.normalizedProducts,
+        ),
       );
     }
 
     return Prisma.join(conditions, ' AND ');
+  }
+
+  private buildSqlEqualsAnyCondition(
+    expression: Prisma.Sql,
+    values: string[],
+  ): Prisma.Sql {
+    return Prisma.sql`(${Prisma.join(
+      values.map((value) => Prisma.sql`${expression} = ${value}`),
+      ' OR ',
+    )})`;
   }
 
   private async getTopBuyer(
@@ -955,12 +1010,12 @@ export class OverviewRepository {
     >(Prisma.sql`
       WITH grouped AS (
         SELECT
-          NULLIF(BTRIM(record."buyer_region_code"), '') AS region_code,
+          ${this.buildResolvedRegionGroupSql('record."buyer_region_code"')} AS region_code,
           SUM(${amountWithVatSql}) AS amount
         FROM "RegistryRecord" AS record
         WHERE ${whereSql}
           AND ${supplierIdentitySql} IS NOT NULL
-          AND NULLIF(BTRIM(record."buyer_region_code"), '') IS NOT NULL
+          AND ${this.buildResolvedRegionGroupSql('record."buyer_region_code"')} IS NOT NULL
         GROUP BY 1
       ),
       totals AS (
@@ -998,7 +1053,7 @@ export class OverviewRepository {
       'record."seller_tax_number"',
       'record."seller_name"',
     );
-    const normalizedUktzedSql = this.buildNormalizedUktzedSql();
+    const outputUktzedSql = this.buildOutputUktzedSql();
     const amountWithVatSql = this.amountWithVatSql();
     const whereSql = this.buildBaseScopeSql(scope);
 
@@ -1011,12 +1066,12 @@ export class OverviewRepository {
     >(Prisma.sql`
       WITH grouped AS (
         SELECT
-          NULLIF(${normalizedUktzedSql}, '') AS code,
+          NULLIF(${outputUktzedSql}, '') AS code,
           SUM(${amountWithVatSql}) AS amount
         FROM "RegistryRecord" AS record
         WHERE ${whereSql}
           AND ${supplierIdentitySql} IS NOT NULL
-          AND NULLIF(${normalizedUktzedSql}, '') IS NOT NULL
+          AND NULLIF(${outputUktzedSql}, '') IS NOT NULL
         GROUP BY 1
       ),
       totals AS (
@@ -1123,10 +1178,10 @@ export class OverviewRepository {
       }>
     >(Prisma.sql`
       WITH grouped AS (
-        SELECT DISTINCT NULLIF(BTRIM(record."buyer_region_code"), '') AS region_code
+        SELECT DISTINCT ${this.buildResolvedRegionGroupSql('record."buyer_region_code"')} AS region_code
         FROM "RegistryRecord" AS record
         WHERE ${whereSql}
-          AND NULLIF(BTRIM(record."buyer_region_code"), '') IS NOT NULL
+          AND ${this.buildResolvedRegionGroupSql('record."buyer_region_code"')} IS NOT NULL
       ),
       mapped AS (
         SELECT grouped.region_code AS region_code
@@ -1278,7 +1333,7 @@ export class OverviewRepository {
     total: number;
   }> {
     const whereSql = this.buildBaseScopeSql(scope);
-    const normalizedProductSql = this.buildNormalizedProductSql();
+    const outputProductSql = this.buildOutputProductSql();
     const search = this.normalizeText(options.search)?.toLowerCase() ?? null;
     const offset = (options.page - 1) * options.limit;
 
@@ -1289,10 +1344,10 @@ export class OverviewRepository {
       }>
     >(Prisma.sql`
       WITH grouped AS (
-        SELECT DISTINCT NULLIF(${normalizedProductSql}, '') AS value
+        SELECT DISTINCT NULLIF(${outputProductSql}, '') AS value
         FROM "RegistryRecord" AS record
         WHERE ${whereSql}
-          AND NULLIF(${normalizedProductSql}, '') IS NOT NULL
+          AND NULLIF(${outputProductSql}, '') IS NOT NULL
       ),
       filtered AS (
         SELECT grouped.value AS value
@@ -1345,7 +1400,7 @@ export class OverviewRepository {
     total: number;
   }> {
     const whereSql = this.buildBaseScopeSql(scope);
-    const normalizedUktzedSql = this.buildNormalizedUktzedSql();
+    const outputUktzedSql = this.buildOutputUktzedSql();
     const search = this.normalizeText(options.search)?.toLowerCase() ?? null;
     const offset = (options.page - 1) * options.limit;
 
@@ -1356,10 +1411,10 @@ export class OverviewRepository {
       }>
     >(Prisma.sql`
       WITH grouped AS (
-        SELECT DISTINCT NULLIF(${normalizedUktzedSql}, '') AS value
+        SELECT DISTINCT NULLIF(${outputUktzedSql}, '') AS value
         FROM "RegistryRecord" AS record
         WHERE ${whereSql}
-          AND NULLIF(${normalizedUktzedSql}, '') IS NOT NULL
+          AND NULLIF(${outputUktzedSql}, '') IS NOT NULL
       ),
       filtered AS (
         SELECT grouped.value AS value
@@ -1410,6 +1465,10 @@ export class OverviewRepository {
       .map(([code]) => code);
     const normalizedSearch = `%${search}%`;
 
+    if (ANALYTICS_UNKNOWN_REGION_NAME.toLowerCase().includes(search)) {
+      matchingCodes.push(ANALYTICS_UNKNOWN_REGION_CODE);
+    }
+
     if (matchingCodes.length === 0) {
       return Prisma.sql`LOWER(COALESCE(mapped.region_code, '')) LIKE ${normalizedSearch}`;
     }
@@ -1446,6 +1505,7 @@ export class OverviewRepository {
     uktzed: string | null;
     unit: string | null;
     quantity: Prisma.Decimal | null;
+    priceWithVat: Prisma.Decimal | null;
     salesWithVat: Prisma.Decimal | null;
     purchasesWithVat: Prisma.Decimal | null;
     marketShare: Prisma.Decimal | null;
@@ -1461,6 +1521,7 @@ export class OverviewRepository {
       uktzed: row.uktzed,
       unit: row.unit,
       quantity: row.quantity === null ? null : Number(row.quantity),
+      priceWithVat: row.priceWithVat === null ? null : Number(row.priceWithVat),
       salesWithVat: Number(row.salesWithVat ?? 0),
       purchasesWithVat: Number(row.purchasesWithVat ?? 0),
       marketShare: Number(row.marketShare ?? 0),
@@ -1475,6 +1536,19 @@ export class OverviewRepository {
         WHEN BTRIM(COALESCE(${Prisma.raw(column)}, '')) ~ '^[0-9]+$'
           THEN CAST(CAST(BTRIM(COALESCE(${Prisma.raw(column)}, '')) AS integer) AS text)
         ELSE BTRIM(COALESCE(${Prisma.raw(column)}, ''))
+      END
+    `;
+  }
+
+  private buildResolvedRegionGroupSql(column: string): Prisma.Sql {
+    const knownCodes = Object.keys(ANALYTICS_REGION_DICTIONARY);
+    const normalizedCodeSql = this.resolveRegionCodeCaseSql(column);
+
+    return Prisma.sql`
+      CASE
+        WHEN ${normalizedCodeSql} IS NULL THEN NULL
+        WHEN ${normalizedCodeSql} IN (${Prisma.join(knownCodes)}) THEN ${normalizedCodeSql}
+        ELSE ${ANALYTICS_UNKNOWN_REGION_CODE}
       END
     `;
   }
@@ -1503,6 +1577,8 @@ export class OverviewRepository {
         return Prisma.sql`grouped.unit ${directionSql} NULLS LAST, grouped.period_start DESC`;
       case 'quantity':
         return Prisma.sql`grouped.quantity ${directionSql}, grouped.period_start DESC`;
+      case 'priceWithVat':
+        return Prisma.sql`"priceWithVat" ${directionSql} NULLS LAST, grouped.period_start DESC`;
       case 'salesWithVat':
         return Prisma.sql`grouped.sales_with_vat ${directionSql}, grouped.period_start DESC`;
       case 'purchasesWithVat':
@@ -1638,7 +1714,7 @@ export class OverviewRepository {
       NULLIF(
         REGEXP_REPLACE(
           BTRIM(COALESCE(${Prisma.raw(column)}, '')),
-          '\s+',
+          '\\s+',
           '',
           'g'
         ),
@@ -1652,7 +1728,7 @@ export class OverviewRepository {
       NULLIF(
         REGEXP_REPLACE(
           BTRIM(COALESCE(${Prisma.raw(column)}, '')),
-          '\s+',
+          '\\s+',
           ' ',
           'g'
         ),
@@ -1666,7 +1742,7 @@ export class OverviewRepository {
       NULLIF(
         REGEXP_REPLACE(
           BTRIM(COALESCE(record."item_description", '')),
-          '\s+',
+          '\\s+',
           ' ',
           'g'
         ),
@@ -1675,17 +1751,34 @@ export class OverviewRepository {
     `;
   }
 
+  private buildOutputProductSql(): Prisma.Sql {
+    return Prisma.sql`
+      NULLIF(BTRIM(COALESCE(record."item_description", '')), '')
+    `;
+  }
+
   private buildNormalizedUktzedSql(): Prisma.Sql {
     return Prisma.sql`
       REGEXP_REPLACE(
         REGEXP_REPLACE(
           BTRIM(COALESCE(record."uktzed_code", '')),
-          '\s+',
+          '\\s+',
           '',
           'g'
         ),
-        '\.0+$',
+        '\\.0+$',
         ''
+      )
+    `;
+  }
+
+  private buildOutputUktzedSql(): Prisma.Sql {
+    return Prisma.sql`
+      REGEXP_REPLACE(
+        BTRIM(COALESCE(record."uktzed_code", '')),
+        '\\s+',
+        '',
+        'g'
       )
     `;
   }

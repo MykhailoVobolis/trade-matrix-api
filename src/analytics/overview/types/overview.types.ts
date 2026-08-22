@@ -29,7 +29,7 @@ export type AnalyticsCompanyIdentity = {
 };
 
 export type AnalyticsFilterSet = {
-  uktzedPrefixes: string[];
+  uktzedValues: string[];
   normalizedProducts: string[];
   buyerRegionCodes: string[];
   buyerTaxNumbers: string[];
@@ -125,6 +125,7 @@ export type AnalyticsOverviewTableItem = {
   uktzed: string | null;
   unit: string | null;
   quantity: number | null;
+  priceWithVat: number | null;
   salesWithVat: number;
   purchasesWithVat: number;
   marketShare: number;

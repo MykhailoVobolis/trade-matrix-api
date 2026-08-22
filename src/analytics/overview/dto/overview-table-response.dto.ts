@@ -34,6 +34,9 @@ export class OverviewTableItemDto {
   @ApiPropertyOptional({ example: 0, nullable: true })
   quantity: number | null;
 
+  @ApiPropertyOptional({ example: 0, nullable: true })
+  priceWithVat: number | null;
+
   @ApiProperty({ example: 0 })
   salesWithVat: number;
 
