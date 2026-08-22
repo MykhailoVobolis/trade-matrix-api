@@ -26,9 +26,13 @@ export class OverviewService {
   constructor(private readonly overviewRepository: OverviewRepository) {}
 
   getOverview(
-    _user: AuthenticatedUser,
+    user: AuthenticatedUser,
     query: OverviewQueryDto,
   ): OverviewResponseDto {
+    const scope = this.overviewRepository.createBaseScope(user.userId, query);
+    const where = this.overviewRepository.buildBaseWhere(scope);
+    void where;
+
     return {
       period: this.toPeriod(query),
       comparison: this.toComparison(query),
@@ -44,10 +48,12 @@ export class OverviewService {
   }
 
   getOverviewTable(
-    _user: AuthenticatedUser,
+    user: AuthenticatedUser,
     query: OverviewTableQueryDto,
   ): OverviewTableResponseDto {
-    void this.overviewRepository;
+    const scope = this.overviewRepository.createBaseScope(user.userId, query);
+    const where = this.overviewRepository.buildBaseWhere(scope);
+    void where;
 
     return {
       items: [],
@@ -58,9 +64,13 @@ export class OverviewService {
   }
 
   getFilterOptions(
-    _user: AuthenticatedUser,
+    user: AuthenticatedUser,
     query: FilterOptionsQueryDto,
   ): FilterOptionsResponseDto {
+    const scope = this.overviewRepository.createBaseScope(user.userId, query);
+    const where = this.overviewRepository.buildBaseWhere(scope);
+    void where;
+
     return {
       dimension: query.dimension,
       items: [],
@@ -71,9 +81,13 @@ export class OverviewService {
   }
 
   exportOverview(
-    _user: AuthenticatedUser,
+    user: AuthenticatedUser,
     query: OverviewExportQueryDto,
   ): OverviewExportResponseDto {
+    const scope = this.overviewRepository.createBaseScope(user.userId, query);
+    const where = this.overviewRepository.buildBaseWhere(scope);
+    void where;
+
     return {
       format: query.format ?? 'csv',
       message: 'Overview export scaffold is ready.',

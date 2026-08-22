@@ -37,6 +37,10 @@ export const ANALYTICS_SORT_DIRECTIONS = ['asc', 'desc'] as const;
 
 export const ANALYTICS_EXPORT_FORMATS = ['csv', 'xlsx'] as const;
 
+export const ANALYTICS_SPECIAL_TAX_IDENTITY_NAMES = {
+  '0': ['неплатник'],
+} as const;
+
 export const ANALYTICS_DEFAULT_TABLE_PAGE = 1;
 export const ANALYTICS_DEFAULT_TABLE_LIMIT = 10;
 export const ANALYTICS_DEFAULT_FILTER_OPTIONS_PAGE = 1;

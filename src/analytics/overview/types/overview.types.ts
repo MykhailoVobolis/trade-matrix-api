@@ -20,3 +20,29 @@ export type AnalyticsTableSortField =
 
 export type AnalyticsSortDirection = (typeof ANALYTICS_SORT_DIRECTIONS)[number];
 export type AnalyticsExportFormat = (typeof ANALYTICS_EXPORT_FORMATS)[number];
+
+export type AnalyticsCompanyIdentity = {
+  taxNumber: string | null;
+  normalizedName: string | null;
+  identityKey: string | null;
+  isSemanticSpecialIdentity: boolean;
+};
+
+export type AnalyticsFilterSet = {
+  uktzedPrefixes: string[];
+  normalizedProducts: string[];
+  buyerRegionCodes: string[];
+  buyerTaxNumbers: string[];
+  supplierTaxNumbers: string[];
+};
+
+export type AnalyticsDateRange = {
+  from: Date;
+  to: Date;
+};
+
+export type AnalyticsBaseScope = {
+  userId: string;
+  dateRange: AnalyticsDateRange;
+  filters: AnalyticsFilterSet;
+};
