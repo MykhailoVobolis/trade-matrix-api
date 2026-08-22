@@ -1,14 +1,18 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { PrismaService } from '../../prisma/prisma.service';
 import { ANALYTICS_SPECIAL_TAX_IDENTITY_NAMES } from './constants/overview.constants';
 import { OverviewBaseQueryDto } from './dto/overview-base-query.dto';
 import type {
   AnalyticsBaseScope,
   AnalyticsCompanyIdentity,
+  AnalyticsKpiTotals,
 } from './types/overview.types';
 
 @Injectable()
 export class OverviewRepository {
+  constructor(private readonly prisma: PrismaService) {}
+
   createBaseScope(
     userId: string,
     query: OverviewBaseQueryDto,
@@ -69,6 +73,80 @@ export class OverviewRepository {
     }
 
     return where;
+  }
+
+  async getKpiTotals(scope: AnalyticsBaseScope): Promise<AnalyticsKpiTotals> {
+    const amountWithVatSql = Prisma.sql`COALESCE(record."supply_amount_without_vat", 0) + COALESCE(record."vat_amount", 0)`;
+    const buyerIdentitySql = this.buildCompanyIdentitySql(
+      'record."buyer_tax_number"',
+      'record."buyer_name"',
+    );
+    const supplierIdentitySql = this.buildCompanyIdentitySql(
+      'record."seller_tax_number"',
+      'record."seller_name"',
+    );
+    const whereSql = this.buildBaseScopeSql(scope);
+
+    const [row] = await this.prisma.$queryRaw<
+      Array<{
+        salesWithVat: Prisma.Decimal | null;
+        purchasesWithVat: Prisma.Decimal | null;
+        activeBuyers: bigint | number;
+        activeSuppliers: bigint | number;
+        salesRegions: bigint | number;
+      }>
+    >(Prisma.sql`
+      SELECT
+        COALESCE(
+          SUM(
+            CASE
+              WHEN ${supplierIdentitySql} IS NOT NULL THEN ${amountWithVatSql}
+              ELSE 0
+            END
+          ),
+          0
+        ) AS "salesWithVat",
+        COALESCE(
+          SUM(
+            CASE
+              WHEN ${buyerIdentitySql} IS NOT NULL THEN ${amountWithVatSql}
+              ELSE 0
+            END
+          ),
+          0
+        ) AS "purchasesWithVat",
+        COUNT(
+          DISTINCT CASE
+            WHEN ${supplierIdentitySql} IS NOT NULL THEN ${buyerIdentitySql}
+            ELSE NULL
+          END
+        ) AS "activeBuyers",
+        COUNT(
+          DISTINCT CASE
+            WHEN ${buyerIdentitySql} IS NOT NULL THEN ${supplierIdentitySql}
+            ELSE NULL
+          END
+        ) AS "activeSuppliers",
+        COUNT(
+          DISTINCT CASE
+            WHEN ${supplierIdentitySql} IS NOT NULL
+             AND record."buyer_region_code" IS NOT NULL
+             AND BTRIM(record."buyer_region_code") <> ''
+            THEN BTRIM(record."buyer_region_code")
+            ELSE NULL
+          END
+        ) AS "salesRegions"
+      FROM "RegistryRecord" AS record
+      WHERE ${whereSql}
+    `);
+
+    return {
+      salesWithVat: Number(row?.salesWithVat ?? 0),
+      purchasesWithVat: Number(row?.purchasesWithVat ?? 0),
+      activeBuyers: Number(row?.activeBuyers ?? 0),
+      activeSuppliers: Number(row?.activeSuppliers ?? 0),
+      salesRegions: Number(row?.salesRegions ?? 0),
+    };
   }
 
   buildSupplierIdentity(
@@ -188,5 +266,134 @@ export class OverviewRepository {
 
   private toEndOfDayUtc(date: string): Date {
     return new Date(`${date}T23:59:59.999Z`);
+  }
+
+  private buildBaseScopeSql(scope: AnalyticsBaseScope): Prisma.Sql {
+    const conditions: Prisma.Sql[] = [
+      Prisma.sql`record."userId" = ${scope.userId}`,
+      Prisma.sql`record."is_canonical" = TRUE`,
+      Prisma.sql`COALESCE(record."is_excluded", FALSE) = FALSE`,
+      Prisma.sql`record."invoice_date" >= ${scope.dateRange.from}`,
+      Prisma.sql`record."invoice_date" <= ${scope.dateRange.to}`,
+    ];
+
+    if (scope.filters.buyerRegionCodes.length > 0) {
+      conditions.push(
+        Prisma.sql`BTRIM(COALESCE(record."buyer_region_code", '')) IN (${Prisma.join(scope.filters.buyerRegionCodes)})`,
+      );
+    }
+
+    if (scope.filters.buyerTaxNumbers.length > 0) {
+      conditions.push(
+        Prisma.sql`${this.buildCompanyIdentitySql(
+          'record."buyer_tax_number"',
+          'record."buyer_name"',
+        )} IN (${Prisma.join(scope.filters.buyerTaxNumbers)})`,
+      );
+    }
+
+    if (scope.filters.supplierTaxNumbers.length > 0) {
+      conditions.push(
+        Prisma.sql`${this.buildCompanyIdentitySql(
+          'record."seller_tax_number"',
+          'record."seller_name"',
+        )} IN (${Prisma.join(scope.filters.supplierTaxNumbers)})`,
+      );
+    }
+
+    if (scope.filters.uktzedPrefixes.length > 0) {
+      conditions.push(
+        Prisma.sql`(${Prisma.join(
+          scope.filters.uktzedPrefixes.map((prefix) => {
+            const normalizedPrefix = `${prefix}%`;
+
+            return Prisma.sql`${this.buildNormalizedUktzedSql()} LIKE ${normalizedPrefix}`;
+          }),
+          ' OR ',
+        )})`,
+      );
+    }
+
+    if (scope.filters.normalizedProducts.length > 0) {
+      conditions.push(
+        Prisma.sql`${this.buildNormalizedProductSql()} IN (${Prisma.join(scope.filters.normalizedProducts)})`,
+      );
+    }
+
+    return Prisma.join(conditions, ' AND ');
+  }
+
+  private buildCompanyIdentitySql(
+    taxNumberColumn: string,
+    nameColumn: string,
+  ): Prisma.Sql {
+    const normalizedTaxSql = this.buildNormalizedTaxSql(taxNumberColumn);
+    const normalizedNameSql = this.buildNormalizedTextSql(nameColumn);
+
+    return Prisma.sql`
+      CASE
+        WHEN ${normalizedTaxSql} IS NULL THEN NULL
+        WHEN ${normalizedTaxSql} = '0' AND ${normalizedNameSql} = 'неплатник' THEN '0'
+        WHEN ${normalizedTaxSql} ~ '^[0-9]+$' THEN ${normalizedTaxSql}
+        ELSE NULL
+      END
+    `;
+  }
+
+  private buildNormalizedTaxSql(column: string): Prisma.Sql {
+    return Prisma.sql`
+      NULLIF(
+        REGEXP_REPLACE(
+          BTRIM(COALESCE(${Prisma.raw(column)}, '')),
+          '\s+',
+          '',
+          'g'
+        ),
+        ''
+      )
+    `;
+  }
+
+  private buildNormalizedTextSql(column: string): Prisma.Sql {
+    return Prisma.sql`
+      NULLIF(
+        REGEXP_REPLACE(
+          BTRIM(COALESCE(${Prisma.raw(column)}, '')),
+          '\s+',
+          ' ',
+          'g'
+        ),
+        ''
+      )
+    `;
+  }
+
+  private buildNormalizedProductSql(): Prisma.Sql {
+    return Prisma.sql`
+      NULLIF(
+        REGEXP_REPLACE(
+          BTRIM(COALESCE(record."item_description", '')),
+          '\s+',
+          ' ',
+          'g'
+        ),
+        ''
+      )
+    `;
+  }
+
+  private buildNormalizedUktzedSql(): Prisma.Sql {
+    return Prisma.sql`
+      REGEXP_REPLACE(
+        REGEXP_REPLACE(
+          BTRIM(COALESCE(record."uktzed_code", '')),
+          '\s+',
+          '',
+          'g'
+        ),
+        '\.0+$',
+        ''
+      )
+    `;
   }
 }

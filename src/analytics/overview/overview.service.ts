@@ -44,16 +44,27 @@ export class OverviewService {
   getOverview(
     user: AuthenticatedUser,
     query: OverviewQueryDto,
-  ): OverviewResponseDto {
+  ): Promise<OverviewResponseDto> {
     const resolved = this.resolveOverviewContext(query);
     const scope = this.overviewRepository.createBaseScope(user.userId, query);
     const where = this.overviewRepository.buildBaseWhere(scope);
     void where;
+    const comparisonScope = resolved.comparisonRange
+      ? {
+          ...scope,
+          dateRange: resolved.comparisonRange,
+        }
+      : null;
 
-    return {
+    return Promise.all([
+      this.overviewRepository.getKpiTotals(scope),
+      comparisonScope
+        ? this.overviewRepository.getKpiTotals(comparisonScope)
+        : Promise.resolve(null),
+    ]).then(([currentKpi, previousKpi]) => ({
       period: this.toPeriod(resolved),
       comparison: this.toComparison(resolved),
-      kpi: this.buildEmptyKpi(),
+      kpi: this.buildKpi(currentKpi, previousKpi),
       trend: [],
       marketStructure: {},
       topBuyers: [],
@@ -61,7 +72,7 @@ export class OverviewService {
       topProducts: [],
       topRegions: [],
       insights: [],
-    };
+    }));
   }
 
   getOverviewTable(
@@ -134,16 +145,49 @@ export class OverviewService {
     };
   }
 
-  private buildEmptyKpi(): Record<string, OverviewMetricDto> {
-    const emptyMetric = this.buildMetric(0, null);
+  private buildKpi(
+    current: {
+      salesWithVat: number;
+      purchasesWithVat: number;
+      activeBuyers: number;
+      activeSuppliers: number;
+      salesRegions: number;
+    },
+    previous: {
+      salesWithVat: number;
+      purchasesWithVat: number;
+      activeBuyers: number;
+      activeSuppliers: number;
+      salesRegions: number;
+    } | null,
+  ): Record<string, OverviewMetricDto> {
+    const currentBalance = current.salesWithVat - current.purchasesWithVat;
+    const previousBalance = previous
+      ? previous.salesWithVat - previous.purchasesWithVat
+      : null;
 
     return {
-      salesWithVat: emptyMetric,
-      purchasesWithVat: emptyMetric,
-      balance: emptyMetric,
-      activeBuyers: emptyMetric,
-      activeSuppliers: emptyMetric,
-      salesRegions: emptyMetric,
+      salesWithVat: this.buildMetric(
+        current.salesWithVat,
+        previous?.salesWithVat ?? null,
+      ),
+      purchasesWithVat: this.buildMetric(
+        current.purchasesWithVat,
+        previous?.purchasesWithVat ?? null,
+      ),
+      balance: this.buildMetric(currentBalance, previousBalance),
+      activeBuyers: this.buildMetric(
+        current.activeBuyers,
+        previous?.activeBuyers ?? null,
+      ),
+      activeSuppliers: this.buildMetric(
+        current.activeSuppliers,
+        previous?.activeSuppliers ?? null,
+      ),
+      salesRegions: this.buildMetric(
+        current.salesRegions,
+        previous?.salesRegions ?? null,
+      ),
     };
   }
 

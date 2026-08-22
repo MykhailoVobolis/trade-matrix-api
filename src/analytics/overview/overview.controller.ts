@@ -33,7 +33,7 @@ export class OverviewController {
   getOverview(
     @CurrentUser() user: AuthenticatedUser,
     @Query() query: OverviewQueryDto,
-  ): OverviewResponseDto {
+  ): Promise<OverviewResponseDto> {
     return this.overviewService.getOverview(user, query);
   }
 

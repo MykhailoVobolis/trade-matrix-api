@@ -46,3 +46,11 @@ export type AnalyticsBaseScope = {
   dateRange: AnalyticsDateRange;
   filters: AnalyticsFilterSet;
 };
+
+export type AnalyticsKpiTotals = {
+  salesWithVat: number;
+  purchasesWithVat: number;
+  activeBuyers: number;
+  activeSuppliers: number;
+  salesRegions: number;
+};
