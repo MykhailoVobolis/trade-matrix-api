@@ -457,14 +457,18 @@ export class OverviewRepository {
     items: Array<{ value: string; label: string | null }>;
     total: number;
   }> {
-    if (dimension === 'buyerRegions') {
-      return this.getBuyerRegionFilterOptions(scope, options);
+    switch (dimension) {
+      case 'buyers':
+        return this.getEntityFilterOptions(scope, options, 'buyer');
+      case 'suppliers':
+        return this.getEntityFilterOptions(scope, options, 'supplier');
+      case 'products':
+        return this.getProductFilterOptions(scope, options);
+      case 'uktzed':
+        return this.getUktzedFilterOptions(scope, options);
+      case 'buyerRegions':
+        return this.getBuyerRegionFilterOptions(scope, options);
     }
-
-    return {
-      items: [],
-      total: 0,
-    };
   }
 
   async getOverviewTable(
@@ -1009,12 +1013,13 @@ export class OverviewRepository {
     total: number;
   }> {
     const whereSql = this.buildBaseScopeSql(scope);
-    const search = this.normalizeText(options.search)?.toLowerCase() ?? null;
     const offset = (options.page - 1) * options.limit;
+    const search = this.normalizeText(options.search)?.toLowerCase() ?? null;
 
     const rows = await this.prisma.$queryRaw<
       Array<{
         regionCode: string | null;
+        totalCount: bigint | number;
       }>
     >(Prisma.sql`
       WITH grouped AS (
@@ -1022,47 +1027,324 @@ export class OverviewRepository {
         FROM "RegistryRecord" AS record
         WHERE ${whereSql}
           AND NULLIF(BTRIM(record."buyer_region_code"), '') IS NOT NULL
+      ),
+      mapped AS (
+        SELECT grouped.region_code AS region_code
+        FROM grouped
+      ),
+      filtered AS (
+        SELECT mapped.region_code AS region_code
+        FROM mapped
+        WHERE ${this.buildBuyerRegionSearchSql(search)}
+      ),
+      paginated AS (
+        SELECT
+          filtered.region_code AS region_code,
+          COUNT(*) OVER() AS total_count
+        FROM filtered
+        ORDER BY filtered.region_code ASC
+        LIMIT ${options.limit}
+        OFFSET ${offset}
       )
-      SELECT grouped.region_code AS "regionCode"
-      FROM grouped
-      ORDER BY grouped.region_code ASC
+      SELECT
+        paginated.region_code AS "regionCode",
+        paginated.total_count AS "totalCount"
+      FROM paginated
     `);
 
-    const filtered = rows
-      .map((row) => {
-        const value = this.resolveRegionCode(row.regionCode);
-        const label = this.resolveRegionName(row.regionCode);
+    return {
+      items: rows
+        .map((row) => {
+          const value = this.resolveRegionCode(row.regionCode);
 
-        return value
-          ? {
-              value,
-              label,
-            }
-          : null;
-      })
-      .filter(
-        (
-          item,
-        ): item is {
-          value: string;
-          label: string | null;
-        } => item !== null,
-      )
-      .filter((item) => {
-        if (!search) {
-          return true;
+          return value
+            ? {
+                value,
+                label: this.resolveRegionName(row.regionCode),
+              }
+            : null;
+        })
+        .filter(
+          (
+            item,
+          ): item is {
+            value: string;
+            label: string | null;
+          } => item !== null,
+        ),
+      total: Number(rows[0]?.totalCount ?? 0),
+    };
+  }
+
+  private async getEntityFilterOptions(
+    scope: AnalyticsBaseScope,
+    options: {
+      search?: string;
+      page: number;
+      limit: number;
+    },
+    role: 'buyer' | 'supplier',
+  ): Promise<{
+    items: Array<{ value: string; label: string | null }>;
+    total: number;
+  }> {
+    const identitySql =
+      role === 'buyer'
+        ? this.buildCompanyIdentitySql(
+            'record."buyer_tax_number"',
+            'record."buyer_name"',
+          )
+        : this.buildCompanyIdentitySql(
+            'record."seller_tax_number"',
+            'record."seller_name"',
+          );
+    const nameColumn =
+      role === 'buyer' ? 'record."buyer_name"' : 'record."seller_name"';
+    const search = this.normalizeText(options.search)?.toLowerCase() ?? null;
+    const whereSql = this.buildBaseScopeSql(scope);
+    const offset = (options.page - 1) * options.limit;
+
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        value: string | null;
+        label: string | null;
+        totalCount: bigint | number;
+      }>
+    >(Prisma.sql`
+      WITH grouped AS (
+        SELECT
+          ${identitySql} AS value,
+          MIN(NULLIF(BTRIM(${Prisma.raw(nameColumn)}), '')) AS label
+        FROM "RegistryRecord" AS record
+        WHERE ${whereSql}
+          AND ${identitySql} IS NOT NULL
+        GROUP BY 1
+      ),
+      filtered AS (
+        SELECT
+          grouped.value AS value,
+          grouped.label AS label
+        FROM grouped
+        WHERE ${
+          search
+            ? Prisma.sql`(
+                LOWER(COALESCE(grouped.label, '')) LIKE ${`%${search}%`}
+                OR LOWER(COALESCE(grouped.value, '')) LIKE ${`%${search}%`}
+              )`
+            : Prisma.sql`TRUE`
         }
-
-        return (
-          item.value.toLowerCase().includes(search) ||
-          item.label?.toLowerCase().includes(search) === true
-        );
-      });
+      ),
+      paginated AS (
+        SELECT
+          filtered.value AS value,
+          filtered.label AS label,
+          COUNT(*) OVER() AS total_count
+        FROM filtered
+        ORDER BY filtered.label ASC NULLS LAST, filtered.value ASC
+        LIMIT ${options.limit}
+        OFFSET ${offset}
+      )
+      SELECT
+        paginated.value AS value,
+        paginated.label AS label,
+        paginated.total_count AS "totalCount"
+      FROM paginated
+    `);
 
     return {
-      items: filtered.slice(offset, offset + options.limit),
-      total: filtered.length,
+      items: this.compactFilterOptionItems(
+        rows.map((row) =>
+          row.value
+            ? {
+                value: row.value,
+                label: row.label,
+              }
+            : null,
+        ),
+      ),
+      total: Number(rows[0]?.totalCount ?? 0),
     };
+  }
+
+  private async getProductFilterOptions(
+    scope: AnalyticsBaseScope,
+    options: {
+      search?: string;
+      page: number;
+      limit: number;
+    },
+  ): Promise<{
+    items: Array<{ value: string; label: string | null }>;
+    total: number;
+  }> {
+    const whereSql = this.buildBaseScopeSql(scope);
+    const normalizedProductSql = this.buildNormalizedProductSql();
+    const search = this.normalizeText(options.search)?.toLowerCase() ?? null;
+    const offset = (options.page - 1) * options.limit;
+
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        value: string | null;
+        totalCount: bigint | number;
+      }>
+    >(Prisma.sql`
+      WITH grouped AS (
+        SELECT DISTINCT NULLIF(${normalizedProductSql}, '') AS value
+        FROM "RegistryRecord" AS record
+        WHERE ${whereSql}
+          AND NULLIF(${normalizedProductSql}, '') IS NOT NULL
+      ),
+      filtered AS (
+        SELECT grouped.value AS value
+        FROM grouped
+        WHERE ${
+          search
+            ? Prisma.sql`LOWER(COALESCE(grouped.value, '')) LIKE ${`%${search}%`}`
+            : Prisma.sql`TRUE`
+        }
+      ),
+      paginated AS (
+        SELECT
+          filtered.value AS value,
+          COUNT(*) OVER() AS total_count
+        FROM filtered
+        ORDER BY filtered.value ASC
+        LIMIT ${options.limit}
+        OFFSET ${offset}
+      )
+      SELECT
+        paginated.value AS value,
+        paginated.total_count AS "totalCount"
+      FROM paginated
+    `);
+
+    return {
+      items: this.compactFilterOptionItems(
+        rows.map((row) =>
+          row.value
+            ? {
+                value: row.value,
+                label: row.value,
+              }
+            : null,
+        ),
+      ),
+      total: Number(rows[0]?.totalCount ?? 0),
+    };
+  }
+
+  private async getUktzedFilterOptions(
+    scope: AnalyticsBaseScope,
+    options: {
+      search?: string;
+      page: number;
+      limit: number;
+    },
+  ): Promise<{
+    items: Array<{ value: string; label: string | null }>;
+    total: number;
+  }> {
+    const whereSql = this.buildBaseScopeSql(scope);
+    const normalizedUktzedSql = this.buildNormalizedUktzedSql();
+    const search = this.normalizeText(options.search)?.toLowerCase() ?? null;
+    const offset = (options.page - 1) * options.limit;
+
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        value: string | null;
+        totalCount: bigint | number;
+      }>
+    >(Prisma.sql`
+      WITH grouped AS (
+        SELECT DISTINCT NULLIF(${normalizedUktzedSql}, '') AS value
+        FROM "RegistryRecord" AS record
+        WHERE ${whereSql}
+          AND NULLIF(${normalizedUktzedSql}, '') IS NOT NULL
+      ),
+      filtered AS (
+        SELECT grouped.value AS value
+        FROM grouped
+        WHERE ${
+          search
+            ? Prisma.sql`LOWER(COALESCE(grouped.value, '')) LIKE ${`%${search}%`}`
+            : Prisma.sql`TRUE`
+        }
+      ),
+      paginated AS (
+        SELECT
+          filtered.value AS value,
+          COUNT(*) OVER() AS total_count
+        FROM filtered
+        ORDER BY filtered.value ASC
+        LIMIT ${options.limit}
+        OFFSET ${offset}
+      )
+      SELECT
+        paginated.value AS value,
+        paginated.total_count AS "totalCount"
+      FROM paginated
+    `);
+
+    return {
+      items: this.compactFilterOptionItems(
+        rows.map((row) =>
+          row.value
+            ? {
+                value: row.value,
+                label: row.value,
+              }
+            : null,
+        ),
+      ),
+      total: Number(rows[0]?.totalCount ?? 0),
+    };
+  }
+
+  private buildBuyerRegionSearchSql(search: string | null): Prisma.Sql {
+    if (!search) {
+      return Prisma.sql`TRUE`;
+    }
+
+    const matchingCodes = Object.entries(ANALYTICS_REGION_DICTIONARY)
+      .filter(([, label]) => label.toLowerCase().includes(search))
+      .map(([code]) => code);
+    const normalizedSearch = `%${search}%`;
+
+    if (matchingCodes.length === 0) {
+      return Prisma.sql`LOWER(COALESCE(mapped.region_code, '')) LIKE ${normalizedSearch}`;
+    }
+
+    return Prisma.sql`(
+      LOWER(COALESCE(mapped.region_code, '')) LIKE ${normalizedSearch}
+      OR ${this.resolveRegionCodeCaseSql('mapped.region_code')} IN (${Prisma.join(
+        matchingCodes,
+      )})
+    )`;
+  }
+
+  private compactFilterOptionItems(
+    items: Array<{ value: string; label: string | null } | null>,
+  ): Array<{ value: string; label: string | null }> {
+    return items.filter(
+      (
+        item,
+      ): item is {
+        value: string;
+        label: string | null;
+      } => item !== null,
+    );
+  }
+
+  private resolveRegionCodeCaseSql(column: string): Prisma.Sql {
+    return Prisma.sql`
+      CASE
+        WHEN NULLIF(BTRIM(COALESCE(${Prisma.raw(column)}, '')), '') IS NULL THEN NULL
+        WHEN BTRIM(COALESCE(${Prisma.raw(column)}, '')) = '0' THEN '0'
+        WHEN BTRIM(COALESCE(${Prisma.raw(column)}, '')) ~ '^[0-9]+$'
+          THEN CAST(CAST(BTRIM(COALESCE(${Prisma.raw(column)}, '')) AS integer) AS text)
+        ELSE BTRIM(COALESCE(${Prisma.raw(column)}, ''))
+      END
+    `;
   }
 
   private buildOverviewTableOrderBySql(
