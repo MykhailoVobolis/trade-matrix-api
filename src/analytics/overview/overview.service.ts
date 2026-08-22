@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import type { AuthenticatedUser } from '../../auth/types/authenticated-user.type';
 import {
   ANALYTICS_DEFAULT_FILTER_OPTIONS_LIMIT,
@@ -20,6 +20,22 @@ import {
 import { OverviewTableQueryDto } from './dto/overview-table-query.dto';
 import { OverviewTableResponseDto } from './dto/overview-table-response.dto';
 import { OverviewRepository } from './overview.repository';
+import type {
+  AnalyticsComparisonMode,
+  AnalyticsTimeGrain,
+} from './types/overview.types';
+
+type ResolvedDateRange = {
+  from: Date;
+  to: Date;
+};
+
+type ResolvedOverviewContext = {
+  currentRange: ResolvedDateRange;
+  comparisonMode: AnalyticsComparisonMode;
+  comparisonRange: ResolvedDateRange | null;
+  timeGrain: AnalyticsTimeGrain;
+};
 
 @Injectable()
 export class OverviewService {
@@ -29,13 +45,14 @@ export class OverviewService {
     user: AuthenticatedUser,
     query: OverviewQueryDto,
   ): OverviewResponseDto {
+    const resolved = this.resolveOverviewContext(query);
     const scope = this.overviewRepository.createBaseScope(user.userId, query);
     const where = this.overviewRepository.buildBaseWhere(scope);
     void where;
 
     return {
-      period: this.toPeriod(query),
-      comparison: this.toComparison(query),
+      period: this.toPeriod(resolved),
+      comparison: this.toComparison(resolved),
       kpi: this.buildEmptyKpi(),
       trend: [],
       marketStructure: {},
@@ -84,6 +101,7 @@ export class OverviewService {
     user: AuthenticatedUser,
     query: OverviewExportQueryDto,
   ): OverviewExportResponseDto {
+    this.resolveOverviewContext(query);
     const scope = this.overviewRepository.createBaseScope(user.userId, query);
     const where = this.overviewRepository.buildBaseWhere(scope);
     void where;
@@ -94,29 +112,30 @@ export class OverviewService {
     };
   }
 
-  private toPeriod(query: OverviewQueryDto): OverviewPeriodDto {
+  private toPeriod(resolved: ResolvedOverviewContext): OverviewPeriodDto {
     return {
-      dateFrom: query.dateFrom,
-      dateTo: query.dateTo,
-      timeGrain: query.timeGrain ?? null,
+      dateFrom: this.formatDateOnly(resolved.currentRange.from),
+      dateTo: this.formatDateOnly(resolved.currentRange.to),
+      timeGrain: resolved.timeGrain,
     };
   }
 
-  private toComparison(query: OverviewQueryDto): OverviewComparisonDto {
+  private toComparison(
+    resolved: ResolvedOverviewContext,
+  ): OverviewComparisonDto {
     return {
-      mode: query.comparisonMode ?? 'NONE',
-      dateFrom: query.compareDateFrom ?? null,
-      dateTo: query.compareDateTo ?? null,
+      mode: resolved.comparisonMode,
+      dateFrom: resolved.comparisonRange
+        ? this.formatDateOnly(resolved.comparisonRange.from)
+        : null,
+      dateTo: resolved.comparisonRange
+        ? this.formatDateOnly(resolved.comparisonRange.to)
+        : null,
     };
   }
 
   private buildEmptyKpi(): Record<string, OverviewMetricDto> {
-    const emptyMetric: OverviewMetricDto = {
-      current: 0,
-      previous: null,
-      deltaPercent: null,
-      hasComparablePrevious: false,
-    };
+    const emptyMetric = this.buildMetric(0, null);
 
     return {
       salesWithVat: emptyMetric,
@@ -126,5 +145,168 @@ export class OverviewService {
       activeSuppliers: emptyMetric,
       salesRegions: emptyMetric,
     };
+  }
+
+  private resolveOverviewContext(
+    query: Pick<
+      OverviewQueryDto | OverviewExportQueryDto,
+      | 'dateFrom'
+      | 'dateTo'
+      | 'comparisonMode'
+      | 'compareDateFrom'
+      | 'compareDateTo'
+      | 'timeGrain'
+    >,
+  ): ResolvedOverviewContext {
+    const currentRange = this.resolveDateRange(query.dateFrom, query.dateTo);
+    const comparisonMode = query.comparisonMode ?? 'NONE';
+    const comparisonRange = this.resolveComparisonRange(currentRange, {
+      comparisonMode,
+      compareDateFrom: query.compareDateFrom,
+      compareDateTo: query.compareDateTo,
+    });
+    const timeGrain = this.resolveTimeGrain(currentRange, query.timeGrain);
+
+    return {
+      currentRange,
+      comparisonMode,
+      comparisonRange,
+      timeGrain,
+    };
+  }
+
+  private resolveDateRange(
+    dateFrom: string,
+    dateTo: string,
+  ): ResolvedDateRange {
+    const from = this.parseDateOnly(dateFrom);
+    const to = this.parseDateOnly(dateTo);
+
+    if (from.getTime() > to.getTime()) {
+      throw new BadRequestException(
+        'dateFrom must be before or equal to dateTo.',
+      );
+    }
+
+    return { from, to };
+  }
+
+  private resolveComparisonRange(
+    currentRange: ResolvedDateRange,
+    options: {
+      comparisonMode: AnalyticsComparisonMode;
+      compareDateFrom?: string;
+      compareDateTo?: string;
+    },
+  ): ResolvedDateRange | null {
+    switch (options.comparisonMode) {
+      case 'NONE':
+        return null;
+      case 'PREVIOUS_PERIOD':
+        return this.resolvePreviousPeriod(currentRange);
+      case 'CUSTOM':
+        if (!options.compareDateFrom || !options.compareDateTo) {
+          throw new BadRequestException(
+            'compareDateFrom and compareDateTo are required for CUSTOM comparison mode.',
+          );
+        }
+
+        return this.resolveDateRange(
+          options.compareDateFrom,
+          options.compareDateTo,
+        );
+    }
+  }
+
+  private resolvePreviousPeriod(
+    currentRange: ResolvedDateRange,
+  ): ResolvedDateRange {
+    const periodLengthInDays = this.getInclusiveDayCount(currentRange);
+    const previousPeriodEnd = this.shiftDate(currentRange.from, -1);
+    const previousPeriodStart = this.shiftDate(
+      previousPeriodEnd,
+      -(periodLengthInDays - 1),
+    );
+
+    return {
+      from: previousPeriodStart,
+      to: previousPeriodEnd,
+    };
+  }
+
+  private resolveTimeGrain(
+    currentRange: ResolvedDateRange,
+    requestedTimeGrain?: AnalyticsTimeGrain,
+  ): AnalyticsTimeGrain {
+    if (requestedTimeGrain) {
+      return requestedTimeGrain;
+    }
+
+    const days = this.getInclusiveDayCount(currentRange);
+
+    if (days <= 31) {
+      return 'DAY';
+    }
+
+    if (days <= 120) {
+      return 'WEEK';
+    }
+
+    if (days <= 730) {
+      return 'MONTH';
+    }
+
+    return 'QUARTER';
+  }
+
+  private buildMetric(
+    current: number,
+    previous: number | null,
+  ): OverviewMetricDto {
+    return {
+      current,
+      previous,
+      deltaPercent:
+        previous === null
+          ? null
+          : this.calculateDeltaPercent(current, previous),
+      hasComparablePrevious: previous !== null && previous !== 0,
+    };
+  }
+
+  private calculateDeltaPercent(
+    current: number,
+    previous: number,
+  ): number | null {
+    if (previous === 0) {
+      return null;
+    }
+
+    return Number((((current - previous) / previous) * 100).toFixed(2));
+  }
+
+  private getInclusiveDayCount(range: ResolvedDateRange): number {
+    const millisecondsPerDay = 24 * 60 * 60 * 1000;
+
+    return (
+      Math.floor(
+        (range.to.getTime() - range.from.getTime()) / millisecondsPerDay,
+      ) + 1
+    );
+  }
+
+  private parseDateOnly(value: string): Date {
+    return new Date(`${value}T00:00:00.000Z`);
+  }
+
+  private shiftDate(value: Date, days: number): Date {
+    const shifted = new Date(value);
+    shifted.setUTCDate(shifted.getUTCDate() + days);
+
+    return shifted;
+  }
+
+  private formatDateOnly(value: Date): string {
+    return value.toISOString().slice(0, 10);
   }
 }
