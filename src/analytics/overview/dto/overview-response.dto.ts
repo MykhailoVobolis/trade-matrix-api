@@ -57,7 +57,7 @@ export class OverviewTrendPointDto {
 }
 
 export class OverviewRankingItemDto {
-  @ApiPropertyOptional({ example: '1234567890', nullable: true })
+  @ApiPropertyOptional({ example: '40075815', nullable: true })
   id: string | null;
 
   @ApiPropertyOptional({ example: 'МЕГАРОСТ', nullable: true })
@@ -71,7 +71,7 @@ export class OverviewRankingItemDto {
 }
 
 export class OverviewTopEntityItemDto {
-  @ApiPropertyOptional({ example: '1234567890', nullable: true })
+  @ApiPropertyOptional({ example: '40075815', nullable: true })
   id: string | null;
 
   @ApiPropertyOptional({ example: 'МЕГАРОСТ', nullable: true })
@@ -137,7 +137,7 @@ export class OverviewTopRegionItemDto {
 }
 
 export class OverviewMarketEntityDto {
-  @ApiPropertyOptional({ example: '1234567890', nullable: true })
+  @ApiPropertyOptional({ example: '40075815', nullable: true })
   id: string | null;
 
   @ApiPropertyOptional({ example: 'МЕГАРОСТ', nullable: true })

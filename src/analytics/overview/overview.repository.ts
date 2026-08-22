@@ -16,7 +16,9 @@ import type {
   AnalyticsMarketRegion,
   AnalyticsMarketStructure,
   AnalyticsMarketUktzed,
+  AnalyticsOverviewTableResult,
   AnalyticsTimeGrain,
+  AnalyticsTableSortField,
   AnalyticsTopEntity,
   AnalyticsTopProduct,
   AnalyticsTopRegion,
@@ -462,6 +464,142 @@ export class OverviewRepository {
     return {
       items: [],
       total: 0,
+    };
+  }
+
+  async getOverviewTable(
+    scope: AnalyticsBaseScope,
+    options: {
+      timeGrain: AnalyticsTimeGrain;
+      page: number;
+      limit: number;
+      sortBy: AnalyticsTableSortField;
+      sortDirection: 'asc' | 'desc';
+    },
+  ): Promise<AnalyticsOverviewTableResult> {
+    const buyerIdentitySql = this.buildCompanyIdentitySql(
+      'record."buyer_tax_number"',
+      'record."buyer_name"',
+    );
+    const supplierIdentitySql = this.buildCompanyIdentitySql(
+      'record."seller_tax_number"',
+      'record."seller_name"',
+    );
+    const amountWithVatSql = this.amountWithVatSql();
+    const bucketExpressionSql = this.buildBucketExpressionSql(
+      options.timeGrain,
+    );
+    const normalizedProductSql = this.buildNormalizedProductSql();
+    const normalizedUktzedSql = this.buildNormalizedUktzedSql();
+    const normalizedUnitSql = this.buildNormalizedTextSql('record."unit_name"');
+    const whereSql = this.buildBaseScopeSql(scope);
+    const offset = (options.page - 1) * options.limit;
+    const orderBySql = this.buildOverviewTableOrderBySql(
+      options.sortBy,
+      options.sortDirection,
+    );
+
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        periodStart: Date;
+        buyerRegionCode: string | null;
+        buyerTaxNumber: string | null;
+        buyerName: string | null;
+        supplierTaxNumber: string | null;
+        supplierName: string | null;
+        product: string | null;
+        uktzed: string | null;
+        unit: string | null;
+        quantity: Prisma.Decimal | null;
+        salesWithVat: Prisma.Decimal | null;
+        purchasesWithVat: Prisma.Decimal | null;
+        marketShare: Prisma.Decimal | null;
+        totalCount: bigint | number;
+      }>
+    >(Prisma.sql`
+      WITH grouped AS (
+        SELECT
+          ${bucketExpressionSql} AS period_start,
+          NULLIF(BTRIM(record."buyer_region_code"), '') AS buyer_region_code,
+          ${buyerIdentitySql} AS buyer_tax_number,
+          MIN(NULLIF(BTRIM(record."buyer_name"), '')) AS buyer_name,
+          ${supplierIdentitySql} AS supplier_tax_number,
+          MIN(NULLIF(BTRIM(record."seller_name"), '')) AS supplier_name,
+          NULLIF(${normalizedProductSql}, '') AS product,
+          NULLIF(${normalizedUktzedSql}, '') AS uktzed,
+          NULLIF(${normalizedUnitSql}, '') AS unit,
+          SUM(COALESCE(record."quantity", 0)) AS quantity,
+          COALESCE(
+            SUM(
+              CASE
+                WHEN ${supplierIdentitySql} IS NOT NULL THEN ${amountWithVatSql}
+                ELSE 0
+              END
+            ),
+            0
+          ) AS sales_with_vat,
+          COALESCE(
+            SUM(
+              CASE
+                WHEN ${buyerIdentitySql} IS NOT NULL THEN ${amountWithVatSql}
+                ELSE 0
+              END
+            ),
+            0
+          ) AS purchases_with_vat
+        FROM "RegistryRecord" AS record
+        WHERE ${whereSql}
+        GROUP BY 1, 2, 3, 5, 7, 8, 9
+      ),
+      totals AS (
+        SELECT
+          COUNT(*) AS total_count,
+          COALESCE(SUM(grouped.sales_with_vat + grouped.purchases_with_vat), 0) AS total_market_amount
+        FROM grouped
+      )
+      SELECT
+        grouped.period_start AS "periodStart",
+        grouped.buyer_region_code AS "buyerRegionCode",
+        grouped.buyer_tax_number AS "buyerTaxNumber",
+        grouped.buyer_name AS "buyerName",
+        grouped.supplier_tax_number AS "supplierTaxNumber",
+        grouped.supplier_name AS "supplierName",
+        grouped.product AS product,
+        grouped.uktzed AS uktzed,
+        grouped.unit AS unit,
+        grouped.quantity AS quantity,
+        grouped.sales_with_vat AS "salesWithVat",
+        grouped.purchases_with_vat AS "purchasesWithVat",
+        CASE
+          WHEN totals.total_market_amount = 0 THEN 0
+          ELSE (grouped.sales_with_vat + grouped.purchases_with_vat)
+            / totals.total_market_amount * 100
+        END AS "marketShare",
+        totals.total_count AS "totalCount"
+      FROM grouped
+      CROSS JOIN totals
+      ORDER BY ${orderBySql}
+      LIMIT ${options.limit}
+      OFFSET ${offset}
+    `);
+
+    return {
+      items: rows.map((row) => ({
+        periodStart: row.periodStart,
+        buyerRegionCode: this.resolveRegionCode(row.buyerRegionCode),
+        buyerTaxNumber: row.buyerTaxNumber,
+        buyerName: row.buyerName,
+        supplierTaxNumber: row.supplierTaxNumber,
+        supplierName: row.supplierName,
+        product: row.product,
+        uktzed: row.uktzed,
+        unit: row.unit,
+        quantity: row.quantity === null ? null : Number(row.quantity),
+        salesWithVat: Number(row.salesWithVat ?? 0),
+        purchasesWithVat: Number(row.purchasesWithVat ?? 0),
+        marketShare: Number(row.marketShare ?? 0),
+      })),
+      total: Number(rows[0]?.totalCount ?? 0),
     };
   }
 
@@ -925,6 +1063,39 @@ export class OverviewRepository {
       items: filtered.slice(offset, offset + options.limit),
       total: filtered.length,
     };
+  }
+
+  private buildOverviewTableOrderBySql(
+    sortBy: AnalyticsTableSortField,
+    sortDirection: 'asc' | 'desc',
+  ): Prisma.Sql {
+    const directionSql =
+      sortDirection === 'asc' ? Prisma.sql`ASC` : Prisma.sql`DESC`;
+
+    switch (sortBy) {
+      case 'period':
+        return Prisma.sql`grouped.period_start ${directionSql}, grouped.buyer_tax_number ASC NULLS LAST`;
+      case 'buyerRegion':
+        return Prisma.sql`grouped.buyer_region_code ${directionSql} NULLS LAST, grouped.period_start DESC`;
+      case 'buyer':
+        return Prisma.sql`grouped.buyer_name ${directionSql} NULLS LAST, grouped.buyer_tax_number ${directionSql} NULLS LAST`;
+      case 'supplier':
+        return Prisma.sql`grouped.supplier_name ${directionSql} NULLS LAST, grouped.supplier_tax_number ${directionSql} NULLS LAST`;
+      case 'product':
+        return Prisma.sql`grouped.product ${directionSql} NULLS LAST, grouped.period_start DESC`;
+      case 'uktzed':
+        return Prisma.sql`grouped.uktzed ${directionSql} NULLS LAST, grouped.period_start DESC`;
+      case 'unit':
+        return Prisma.sql`grouped.unit ${directionSql} NULLS LAST, grouped.period_start DESC`;
+      case 'quantity':
+        return Prisma.sql`grouped.quantity ${directionSql}, grouped.period_start DESC`;
+      case 'salesWithVat':
+        return Prisma.sql`grouped.sales_with_vat ${directionSql}, grouped.period_start DESC`;
+      case 'purchasesWithVat':
+        return Prisma.sql`grouped.purchases_with_vat ${directionSql}, grouped.period_start DESC`;
+      case 'marketShare':
+        return Prisma.sql`"marketShare" ${directionSql}, grouped.period_start DESC`;
+    }
   }
 
   private buildTopEntityQuery(

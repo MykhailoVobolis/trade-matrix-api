@@ -80,7 +80,7 @@ export class OverviewBaseQueryDto {
 
   @ApiPropertyOptional({
     type: [String],
-    example: ['1234567890'],
+    example: ['40075815'],
   })
   @IsOptional()
   @Transform(transformStringArray)
@@ -90,7 +90,7 @@ export class OverviewBaseQueryDto {
 
   @ApiPropertyOptional({
     type: [String],
-    example: ['0987654321'],
+    example: ['42794130'],
   })
   @IsOptional()
   @Transform(transformStringArray)

@@ -113,3 +113,24 @@ export type AnalyticsTopRegion = {
   share: number;
   activeBuyers: number;
 };
+
+export type AnalyticsOverviewTableItem = {
+  periodStart: Date;
+  buyerRegionCode: string | null;
+  buyerTaxNumber: string | null;
+  buyerName: string | null;
+  supplierTaxNumber: string | null;
+  supplierName: string | null;
+  product: string | null;
+  uktzed: string | null;
+  unit: string | null;
+  quantity: number | null;
+  salesWithVat: number;
+  purchasesWithVat: number;
+  marketShare: number;
+};
+
+export type AnalyticsOverviewTableResult = {
+  items: AnalyticsOverviewTableItem[];
+  total: number;
+};

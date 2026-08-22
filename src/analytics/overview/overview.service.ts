@@ -5,6 +5,8 @@ import {
   ANALYTICS_DEFAULT_FILTER_OPTIONS_PAGE,
   ANALYTICS_DEFAULT_TABLE_LIMIT,
   ANALYTICS_DEFAULT_TABLE_PAGE,
+  ANALYTICS_DEFAULT_TABLE_SORT_DIRECTION,
+  ANALYTICS_DEFAULT_TABLE_SORT_FIELD,
 } from './constants/overview.constants';
 import { FilterOptionsQueryDto } from './dto/filter-options-query.dto';
 import { FilterOptionsResponseDto } from './dto/filter-options-response.dto';
@@ -143,19 +145,47 @@ export class OverviewService {
     );
   }
 
-  getOverviewTable(
+  async getOverviewTable(
     user: AuthenticatedUser,
     query: OverviewTableQueryDto,
-  ): OverviewTableResponseDto {
+  ): Promise<OverviewTableResponseDto> {
+    const resolved = this.resolveOverviewContext(query);
     const scope = this.overviewRepository.createBaseScope(user.userId, query);
-    const where = this.overviewRepository.buildBaseWhere(scope);
-    void where;
+    const page = query.page ?? ANALYTICS_DEFAULT_TABLE_PAGE;
+    const limit = query.limit ?? ANALYTICS_DEFAULT_TABLE_LIMIT;
+    const sortBy = query.sortBy ?? ANALYTICS_DEFAULT_TABLE_SORT_FIELD;
+    const sortDirection =
+      query.sortDirection ?? ANALYTICS_DEFAULT_TABLE_SORT_DIRECTION;
+    const result = await this.overviewRepository.getOverviewTable(scope, {
+      timeGrain: resolved.timeGrain,
+      page,
+      limit,
+      sortBy,
+      sortDirection,
+    });
 
     return {
-      items: [],
-      total: 0,
-      page: query.page ?? ANALYTICS_DEFAULT_TABLE_PAGE,
-      limit: query.limit ?? ANALYTICS_DEFAULT_TABLE_LIMIT,
+      items: result.items.map((item) => ({
+        period: this.formatTablePeriod(item.periodStart, resolved.timeGrain),
+        buyerRegionCode: item.buyerRegionCode,
+        buyerRegionName: this.overviewRepository.resolveRegionName(
+          item.buyerRegionCode,
+        ),
+        buyerTaxNumber: item.buyerTaxNumber,
+        buyerName: item.buyerName,
+        supplierTaxNumber: item.supplierTaxNumber,
+        supplierName: item.supplierName,
+        product: item.product,
+        uktzed: item.uktzed,
+        unit: item.unit,
+        quantity: item.quantity,
+        salesWithVat: item.salesWithVat,
+        purchasesWithVat: item.purchasesWithVat,
+        marketShare: item.marketShare,
+      })),
+      total: result.total,
+      page,
+      limit,
     };
   }
 
@@ -742,6 +772,25 @@ export class OverviewService {
         return `${year}-${String(month).padStart(2, '0')}`;
       case 'QUARTER':
         return `Q${Math.floor((month - 1) / 3) + 1} ${year}`;
+    }
+  }
+
+  private formatTablePeriod(
+    value: Date,
+    timeGrain: AnalyticsTimeGrain,
+  ): string {
+    const year = value.getUTCFullYear();
+    const month = value.getUTCMonth() + 1;
+
+    switch (timeGrain) {
+      case 'DAY':
+        return this.formatDateOnly(value);
+      case 'WEEK':
+        return this.formatDateOnly(value);
+      case 'MONTH':
+        return `${year}-${String(month).padStart(2, '0')}`;
+      case 'QUARTER':
+        return `${year}-Q${Math.floor((month - 1) / 3) + 1}`;
     }
   }
 }

@@ -44,7 +44,7 @@ export class OverviewController {
   getOverviewTable(
     @CurrentUser() user: AuthenticatedUser,
     @Query() query: OverviewTableQueryDto,
-  ): OverviewTableResponseDto {
+  ): Promise<OverviewTableResponseDto> {
     return this.overviewService.getOverviewTable(user, query);
   }
 

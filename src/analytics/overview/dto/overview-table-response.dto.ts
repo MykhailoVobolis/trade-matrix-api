@@ -10,11 +10,17 @@ export class OverviewTableItemDto {
   @ApiPropertyOptional({ example: 'Київська', nullable: true })
   buyerRegionName: string | null;
 
-  @ApiPropertyOptional({ example: '1234567890', nullable: true })
+  @ApiPropertyOptional({ example: '40075815', nullable: true })
   buyerTaxNumber: string | null;
 
-  @ApiPropertyOptional({ example: '0987654321', nullable: true })
+  @ApiPropertyOptional({ example: 'МЕГАРОСТ', nullable: true })
+  buyerName: string | null;
+
+  @ApiPropertyOptional({ example: '42794130', nullable: true })
   supplierTaxNumber: string | null;
+
+  @ApiPropertyOptional({ example: 'БЕСТ ТЕРРА ОЙЛ', nullable: true })
+  supplierName: string | null;
 
   @ApiPropertyOptional({ example: 'Літол-24', nullable: true })
   product: string | null;

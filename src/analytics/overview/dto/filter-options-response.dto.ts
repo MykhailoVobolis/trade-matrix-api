@@ -1,7 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class FilterOptionItemDto {
-  @ApiProperty({ example: '1234567890' })
+  @ApiProperty({ example: '42794130' })
   value: string;
 
   @ApiPropertyOptional({ example: 'МЕГАРОСТ', nullable: true })
