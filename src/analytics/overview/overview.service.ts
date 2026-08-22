@@ -22,6 +22,7 @@ import { OverviewTableResponseDto } from './dto/overview-table-response.dto';
 import { OverviewRepository } from './overview.repository';
 import type {
   AnalyticsComparisonMode,
+  AnalyticsMarketStructure,
   AnalyticsTimeGrain,
   AnalyticsTrendPoint,
 } from './types/overview.types';
@@ -63,24 +64,37 @@ export class OverviewService {
         ? this.overviewRepository.getKpiTotals(comparisonScope)
         : Promise.resolve(null),
       this.overviewRepository.getTrendPoints(scope, resolved.timeGrain),
+      this.overviewRepository.getMarketStructure(scope),
       comparisonScope
         ? this.overviewRepository.getTrendPoints(
             comparisonScope,
             resolved.timeGrain,
           )
         : Promise.resolve([]),
-    ]).then(([currentKpi, previousKpi, currentTrend, comparisonTrend]) => ({
-      period: this.toPeriod(resolved),
-      comparison: this.toComparison(resolved),
-      kpi: this.buildKpi(currentKpi, previousKpi),
-      trend: this.buildTrend(currentTrend, comparisonTrend, resolved.timeGrain),
-      marketStructure: {},
-      topBuyers: [],
-      topSuppliers: [],
-      topProducts: [],
-      topRegions: [],
-      insights: [],
-    }));
+    ]).then(
+      ([
+        currentKpi,
+        previousKpi,
+        currentTrend,
+        marketStructure,
+        comparisonTrend,
+      ]) => ({
+        period: this.toPeriod(resolved),
+        comparison: this.toComparison(resolved),
+        kpi: this.buildKpi(currentKpi, previousKpi),
+        trend: this.buildTrend(
+          currentTrend,
+          comparisonTrend,
+          resolved.timeGrain,
+        ),
+        marketStructure,
+        topBuyers: [],
+        topSuppliers: [],
+        topProducts: [],
+        topRegions: [],
+        insights: [],
+      }),
+    );
   }
 
   getOverviewTable(
@@ -116,6 +130,17 @@ export class OverviewService {
         comparisonPurchasesWithVat: comparisonPoint?.purchasesWithVat ?? null,
       };
     });
+  }
+
+  private buildEmptyMarketStructure(): AnalyticsMarketStructure {
+    return {
+      topBuyer: null,
+      topSupplier: null,
+      topBuyerRegion: null,
+      topUKTZED: null,
+      top5BuyersShare: 0,
+      top5SuppliersShare: 0,
+    };
   }
 
   getFilterOptions(

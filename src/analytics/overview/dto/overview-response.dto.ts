@@ -70,6 +70,68 @@ export class OverviewRankingItemDto {
   share: number;
 }
 
+export class OverviewMarketEntityDto {
+  @ApiPropertyOptional({ example: '1234567890', nullable: true })
+  id: string | null;
+
+  @ApiPropertyOptional({ example: 'МЕГАРОСТ', nullable: true })
+  name: string | null;
+
+  @ApiProperty({ example: 0 })
+  amount: number;
+
+  @ApiProperty({ example: 0 })
+  share: number;
+}
+
+export class OverviewMarketRegionDto {
+  @ApiPropertyOptional({ example: '10', nullable: true })
+  regionCode: string | null;
+
+  @ApiPropertyOptional({ example: null, nullable: true })
+  regionName: string | null;
+
+  @ApiProperty({ example: 0 })
+  amount: number;
+
+  @ApiProperty({ example: 0 })
+  share: number;
+}
+
+export class OverviewMarketUktzedDto {
+  @ApiPropertyOptional({ example: '2710', nullable: true })
+  code: string | null;
+
+  @ApiPropertyOptional({ example: null, nullable: true })
+  description: string | null;
+
+  @ApiProperty({ example: 0 })
+  amount: number;
+
+  @ApiProperty({ example: 0 })
+  share: number;
+}
+
+export class OverviewMarketStructureDto {
+  @ApiPropertyOptional({ type: OverviewMarketEntityDto, nullable: true })
+  topBuyer: OverviewMarketEntityDto | null;
+
+  @ApiPropertyOptional({ type: OverviewMarketEntityDto, nullable: true })
+  topSupplier: OverviewMarketEntityDto | null;
+
+  @ApiPropertyOptional({ type: OverviewMarketRegionDto, nullable: true })
+  topBuyerRegion: OverviewMarketRegionDto | null;
+
+  @ApiPropertyOptional({ type: OverviewMarketUktzedDto, nullable: true })
+  topUKTZED: OverviewMarketUktzedDto | null;
+
+  @ApiProperty({ example: 0 })
+  top5BuyersShare: number;
+
+  @ApiProperty({ example: 0 })
+  top5SuppliersShare: number;
+}
+
 export class OverviewInsightDto {
   @ApiProperty({ example: 'SALES_CHANGE' })
   type: string;
@@ -99,11 +161,8 @@ export class OverviewResponseDto {
   @ApiProperty({ type: OverviewTrendPointDto, isArray: true })
   trend: OverviewTrendPointDto[];
 
-  @ApiProperty({
-    type: 'object',
-    additionalProperties: true,
-  })
-  marketStructure: Record<string, unknown>;
+  @ApiProperty({ type: OverviewMarketStructureDto })
+  marketStructure: OverviewMarketStructureDto;
 
   @ApiProperty({ type: OverviewRankingItemDto, isArray: true })
   topBuyers: OverviewRankingItemDto[];

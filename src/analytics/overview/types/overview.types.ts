@@ -60,3 +60,33 @@ export type AnalyticsTrendPoint = {
   salesWithVat: number;
   purchasesWithVat: number;
 };
+
+export type AnalyticsMarketEntity = {
+  id: string | null;
+  name: string | null;
+  amount: number;
+  share: number;
+};
+
+export type AnalyticsMarketRegion = {
+  regionCode: string | null;
+  regionName: string | null;
+  amount: number;
+  share: number;
+};
+
+export type AnalyticsMarketUktzed = {
+  code: string | null;
+  description: string | null;
+  amount: number;
+  share: number;
+};
+
+export type AnalyticsMarketStructure = {
+  topBuyer: AnalyticsMarketEntity | null;
+  topSupplier: AnalyticsMarketEntity | null;
+  topBuyerRegion: AnalyticsMarketRegion | null;
+  topUKTZED: AnalyticsMarketUktzed | null;
+  top5BuyersShare: number;
+  top5SuppliersShare: number;
+};
