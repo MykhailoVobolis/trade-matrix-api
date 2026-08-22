@@ -105,22 +105,41 @@ export class OverviewService {
         previousTopSuppliers,
         previousTopProducts,
         previousTopRegions,
-      ]) => ({
-        period: this.toPeriod(resolved),
-        comparison: this.toComparison(resolved),
-        kpi: this.buildKpi(currentKpi, previousKpi),
-        trend: this.buildTrend(
+      ]) => {
+        const normalizedMarketStructure =
+          this.buildMarketStructure(marketStructure);
+        const normalizedTopRegions = this.buildTopRegions(
+          topRegions,
+          previousTopRegions,
+        );
+        const kpi = this.buildKpi(currentKpi, previousKpi);
+        const trend = this.buildTrend(
           currentTrend,
           comparisonTrend,
           resolved.timeGrain,
-        ),
-        marketStructure: this.buildMarketStructure(marketStructure),
-        topBuyers: this.buildTopEntities(topBuyers, previousTopBuyers),
-        topSuppliers: this.buildTopEntities(topSuppliers, previousTopSuppliers),
-        topProducts: this.buildTopProducts(topProducts, previousTopProducts),
-        topRegions: this.buildTopRegions(topRegions, previousTopRegions),
-        insights: [],
-      }),
+        );
+
+        return {
+          period: this.toPeriod(resolved),
+          comparison: this.toComparison(resolved),
+          kpi,
+          trend,
+          marketStructure: normalizedMarketStructure,
+          topBuyers: this.buildTopEntities(topBuyers, previousTopBuyers),
+          topSuppliers: this.buildTopEntities(
+            topSuppliers,
+            previousTopSuppliers,
+          ),
+          topProducts: this.buildTopProducts(topProducts, previousTopProducts),
+          topRegions: normalizedTopRegions,
+          insights: this.buildInsights({
+            kpi,
+            trend,
+            marketStructure: normalizedMarketStructure,
+            topRegions: normalizedTopRegions,
+          }),
+        };
+      },
     );
   }
 
@@ -271,6 +290,167 @@ export class OverviewService {
       topUKTZED: null,
       top5BuyersShare: 0,
       top5SuppliersShare: 0,
+    };
+  }
+
+  private buildInsights(input: {
+    kpi: Record<string, OverviewMetricDto>;
+    trend: Array<{
+      periodStart: string;
+      periodLabel: string;
+      salesWithVat: number;
+      purchasesWithVat: number;
+      comparisonSalesWithVat: number | null;
+      comparisonPurchasesWithVat: number | null;
+    }>;
+    marketStructure: AnalyticsMarketStructure;
+    topRegions: Array<{
+      regionCode: string | null;
+      regionName: string | null;
+      amount: number;
+      share: number;
+      activeBuyers: number;
+      previousAmount: number | null;
+      deltaPercent: number | null;
+    }>;
+  }) {
+    const peakSalesPeriod = this.getPeakTrendPoint(
+      input.trend,
+      'salesWithVat',
+      'comparisonSalesWithVat',
+    );
+    const peakPurchasesPeriod = this.getPeakTrendPoint(
+      input.trend,
+      'purchasesWithVat',
+      'comparisonPurchasesWithVat',
+    );
+    const topRegion = input.topRegions[0] ?? null;
+
+    return [
+      {
+        type: 'SALES_CHANGE',
+        payload: {
+          current: input.kpi.salesWithVat.current,
+          previous: input.kpi.salesWithVat.previous,
+          deltaPercent: input.kpi.salesWithVat.deltaPercent,
+          hasComparablePrevious: input.kpi.salesWithVat.hasComparablePrevious,
+        },
+      },
+      {
+        type: 'PURCHASES_CHANGE',
+        payload: {
+          current: input.kpi.purchasesWithVat.current,
+          previous: input.kpi.purchasesWithVat.previous,
+          deltaPercent: input.kpi.purchasesWithVat.deltaPercent,
+          hasComparablePrevious:
+            input.kpi.purchasesWithVat.hasComparablePrevious,
+        },
+      },
+      {
+        type: 'PEAK_SALES_PERIOD',
+        payload: {
+          periodStart: peakSalesPeriod?.periodStart ?? null,
+          periodLabel: peakSalesPeriod?.periodLabel ?? null,
+          amount: peakSalesPeriod?.currentAmount ?? 0,
+          previousAmount: peakSalesPeriod?.previousAmount ?? null,
+        },
+      },
+      {
+        type: 'PEAK_PURCHASES_PERIOD',
+        payload: {
+          periodStart: peakPurchasesPeriod?.periodStart ?? null,
+          periodLabel: peakPurchasesPeriod?.periodLabel ?? null,
+          amount: peakPurchasesPeriod?.currentAmount ?? 0,
+          previousAmount: peakPurchasesPeriod?.previousAmount ?? null,
+        },
+      },
+      {
+        type: 'BUYER_CONCENTRATION',
+        payload: {
+          top5Share: input.marketStructure.top5BuyersShare,
+          topBuyer: input.marketStructure.topBuyer,
+        },
+      },
+      {
+        type: 'SUPPLIER_CONCENTRATION',
+        payload: {
+          top5Share: input.marketStructure.top5SuppliersShare,
+          topSupplier: input.marketStructure.topSupplier,
+        },
+      },
+      {
+        type: 'TOP_REGION',
+        payload: {
+          regionCode: topRegion?.regionCode ?? null,
+          regionName: topRegion?.regionName ?? null,
+          amount: topRegion?.amount ?? 0,
+          share: topRegion?.share ?? 0,
+          activeBuyers: topRegion?.activeBuyers ?? 0,
+          previousAmount: topRegion?.previousAmount ?? null,
+          deltaPercent: topRegion?.deltaPercent ?? null,
+        },
+      },
+      {
+        type: 'TOP_UKTZED',
+        payload: {
+          code: input.marketStructure.topUKTZED?.code ?? null,
+          description: input.marketStructure.topUKTZED?.description ?? null,
+          amount: input.marketStructure.topUKTZED?.amount ?? 0,
+          share: input.marketStructure.topUKTZED?.share ?? 0,
+        },
+      },
+    ];
+  }
+
+  private getPeakTrendPoint(
+    trend: Array<{
+      periodStart: string;
+      periodLabel: string;
+      salesWithVat: number;
+      purchasesWithVat: number;
+      comparisonSalesWithVat: number | null;
+      comparisonPurchasesWithVat: number | null;
+    }>,
+    currentKey: 'salesWithVat' | 'purchasesWithVat',
+    previousKey: 'comparisonSalesWithVat' | 'comparisonPurchasesWithVat',
+  ): {
+    periodStart: string;
+    periodLabel: string;
+    currentAmount: number;
+    previousAmount: number | null;
+  } | null {
+    if (trend.length === 0) {
+      return null;
+    }
+
+    const peak = trend.reduce(
+      (best, point) => {
+        if (!best) {
+          return point;
+        }
+
+        if (point[currentKey] > best[currentKey]) {
+          return point;
+        }
+
+        if (point[currentKey] === best[currentKey]) {
+          return point.periodStart < best.periodStart ? point : best;
+        }
+
+        return best;
+      },
+      null as (typeof trend)[number] | null,
+    );
+
+    if (!peak) {
+      return null;
+    }
+
+    return {
+      periodStart: peak.periodStart,
+      periodLabel: peak.periodLabel,
+      currentAmount: peak[currentKey],
+      previousAmount: peak[previousKey],
     };
   }
 
