@@ -23,6 +23,7 @@ import { OverviewRepository } from './overview.repository';
 import type {
   AnalyticsComparisonMode,
   AnalyticsTimeGrain,
+  AnalyticsTrendPoint,
 } from './types/overview.types';
 
 type ResolvedDateRange = {
@@ -61,11 +62,18 @@ export class OverviewService {
       comparisonScope
         ? this.overviewRepository.getKpiTotals(comparisonScope)
         : Promise.resolve(null),
-    ]).then(([currentKpi, previousKpi]) => ({
+      this.overviewRepository.getTrendPoints(scope, resolved.timeGrain),
+      comparisonScope
+        ? this.overviewRepository.getTrendPoints(
+            comparisonScope,
+            resolved.timeGrain,
+          )
+        : Promise.resolve([]),
+    ]).then(([currentKpi, previousKpi, currentTrend, comparisonTrend]) => ({
       period: this.toPeriod(resolved),
       comparison: this.toComparison(resolved),
       kpi: this.buildKpi(currentKpi, previousKpi),
-      trend: [],
+      trend: this.buildTrend(currentTrend, comparisonTrend, resolved.timeGrain),
       marketStructure: {},
       topBuyers: [],
       topSuppliers: [],
@@ -89,6 +97,25 @@ export class OverviewService {
       page: query.page ?? ANALYTICS_DEFAULT_TABLE_PAGE,
       limit: query.limit ?? ANALYTICS_DEFAULT_TABLE_LIMIT,
     };
+  }
+
+  private buildTrend(
+    current: AnalyticsTrendPoint[],
+    comparison: AnalyticsTrendPoint[],
+    timeGrain: AnalyticsTimeGrain,
+  ) {
+    return current.map((point, index) => {
+      const comparisonPoint = comparison[index] ?? null;
+
+      return {
+        periodStart: this.formatDateOnly(point.periodStart),
+        periodLabel: this.formatPeriodLabel(point.periodStart, timeGrain),
+        salesWithVat: point.salesWithVat,
+        purchasesWithVat: point.purchasesWithVat,
+        comparisonSalesWithVat: comparisonPoint?.salesWithVat ?? null,
+        comparisonPurchasesWithVat: comparisonPoint?.purchasesWithVat ?? null,
+      };
+    });
   }
 
   getFilterOptions(
@@ -352,5 +379,24 @@ export class OverviewService {
 
   private formatDateOnly(value: Date): string {
     return value.toISOString().slice(0, 10);
+  }
+
+  private formatPeriodLabel(
+    value: Date,
+    timeGrain: AnalyticsTimeGrain,
+  ): string {
+    const year = value.getUTCFullYear();
+    const month = value.getUTCMonth() + 1;
+
+    switch (timeGrain) {
+      case 'DAY':
+        return this.formatDateOnly(value);
+      case 'WEEK':
+        return `Week of ${this.formatDateOnly(value)}`;
+      case 'MONTH':
+        return `${year}-${String(month).padStart(2, '0')}`;
+      case 'QUARTER':
+        return `Q${Math.floor((month - 1) / 3) + 1} ${year}`;
+    }
   }
 }

@@ -54,3 +54,9 @@ export type AnalyticsKpiTotals = {
   activeSuppliers: number;
   salesRegions: number;
 };
+
+export type AnalyticsTrendPoint = {
+  periodStart: Date;
+  salesWithVat: number;
+  purchasesWithVat: number;
+};

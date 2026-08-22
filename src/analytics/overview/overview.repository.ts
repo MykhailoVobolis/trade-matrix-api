@@ -7,6 +7,8 @@ import type {
   AnalyticsBaseScope,
   AnalyticsCompanyIdentity,
   AnalyticsKpiTotals,
+  AnalyticsTimeGrain,
+  AnalyticsTrendPoint,
 } from './types/overview.types';
 
 @Injectable()
@@ -147,6 +149,87 @@ export class OverviewRepository {
       activeSuppliers: Number(row?.activeSuppliers ?? 0),
       salesRegions: Number(row?.salesRegions ?? 0),
     };
+  }
+
+  async getTrendPoints(
+    scope: AnalyticsBaseScope,
+    timeGrain: AnalyticsTimeGrain,
+  ): Promise<AnalyticsTrendPoint[]> {
+    const amountWithVatSql = Prisma.sql`COALESCE(record."supply_amount_without_vat", 0) + COALESCE(record."vat_amount", 0)`;
+    const buyerIdentitySql = this.buildCompanyIdentitySql(
+      'record."buyer_tax_number"',
+      'record."buyer_name"',
+    );
+    const supplierIdentitySql = this.buildCompanyIdentitySql(
+      'record."seller_tax_number"',
+      'record."seller_name"',
+    );
+    const bucketExpressionSql = this.buildBucketExpressionSql(timeGrain);
+    const generateSeriesStart = this.getBucketStartDate(
+      scope.dateRange.from,
+      timeGrain,
+    );
+    const generateSeriesEnd = this.getBucketStartDate(
+      scope.dateRange.to,
+      timeGrain,
+    );
+    const seriesStepSql = this.buildSeriesStepSql(timeGrain);
+    const whereSql = this.buildBaseScopeSql(scope);
+
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        periodStart: Date;
+        salesWithVat: Prisma.Decimal | null;
+        purchasesWithVat: Prisma.Decimal | null;
+      }>
+    >(Prisma.sql`
+      WITH buckets AS (
+        SELECT generate_series(
+          ${generateSeriesStart}::timestamp,
+          ${generateSeriesEnd}::timestamp,
+          ${seriesStepSql}
+        ) AS bucket_start
+      ),
+      aggregated AS (
+        SELECT
+          ${bucketExpressionSql} AS bucket_start,
+          COALESCE(
+            SUM(
+              CASE
+                WHEN ${supplierIdentitySql} IS NOT NULL THEN ${amountWithVatSql}
+                ELSE 0
+              END
+            ),
+            0
+          ) AS sales_with_vat,
+          COALESCE(
+            SUM(
+              CASE
+                WHEN ${buyerIdentitySql} IS NOT NULL THEN ${amountWithVatSql}
+                ELSE 0
+              END
+            ),
+            0
+          ) AS purchases_with_vat
+        FROM "RegistryRecord" AS record
+        WHERE ${whereSql}
+        GROUP BY 1
+      )
+      SELECT
+        buckets.bucket_start AS "periodStart",
+        COALESCE(aggregated.sales_with_vat, 0) AS "salesWithVat",
+        COALESCE(aggregated.purchases_with_vat, 0) AS "purchasesWithVat"
+      FROM buckets
+      LEFT JOIN aggregated
+        ON aggregated.bucket_start = buckets.bucket_start
+      ORDER BY buckets.bucket_start ASC
+    `);
+
+    return rows.map((row) => ({
+      periodStart: row.periodStart,
+      salesWithVat: Number(row.salesWithVat ?? 0),
+      purchasesWithVat: Number(row.purchasesWithVat ?? 0),
+    }));
   }
 
   buildSupplierIdentity(
@@ -321,6 +404,57 @@ export class OverviewRepository {
     }
 
     return Prisma.join(conditions, ' AND ');
+  }
+
+  private buildBucketExpressionSql(timeGrain: AnalyticsTimeGrain): Prisma.Sql {
+    switch (timeGrain) {
+      case 'DAY':
+        return Prisma.sql`date_trunc('day', record."invoice_date"::date::timestamp)`;
+      case 'WEEK':
+        return Prisma.sql`date_trunc('week', record."invoice_date"::date::timestamp)`;
+      case 'MONTH':
+        return Prisma.sql`date_trunc('month', record."invoice_date"::date::timestamp)`;
+      case 'QUARTER':
+        return Prisma.sql`date_trunc('quarter', record."invoice_date"::date::timestamp)`;
+    }
+  }
+
+  private buildSeriesStepSql(timeGrain: AnalyticsTimeGrain): Prisma.Sql {
+    switch (timeGrain) {
+      case 'DAY':
+        return Prisma.sql`'1 day'::interval`;
+      case 'WEEK':
+        return Prisma.sql`'1 week'::interval`;
+      case 'MONTH':
+        return Prisma.sql`'1 month'::interval`;
+      case 'QUARTER':
+        return Prisma.sql`'3 months'::interval`;
+    }
+  }
+
+  private getBucketStartDate(date: Date, timeGrain: AnalyticsTimeGrain): Date {
+    const bucketStart = new Date(date);
+    bucketStart.setUTCHours(0, 0, 0, 0);
+
+    switch (timeGrain) {
+      case 'DAY':
+        return bucketStart;
+      case 'WEEK': {
+        const day = bucketStart.getUTCDay();
+        const normalizedDay = day === 0 ? 7 : day;
+        bucketStart.setUTCDate(bucketStart.getUTCDate() - (normalizedDay - 1));
+        return bucketStart;
+      }
+      case 'MONTH':
+        bucketStart.setUTCDate(1);
+        return bucketStart;
+      case 'QUARTER': {
+        const month = bucketStart.getUTCMonth();
+        const quarterStartMonth = Math.floor(month / 3) * 3;
+        bucketStart.setUTCMonth(quarterStartMonth, 1);
+        return bucketStart;
+      }
+    }
   }
 
   private buildCompanyIdentitySql(
