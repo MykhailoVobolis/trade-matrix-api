@@ -45,17 +45,17 @@ model User {
   emailVerificationAttemptCount  Int       @default(0)
   emailVerificationLastAttemptAt DateTime?
 
-  firstName                String
-  lastName                 String
-  role                     UserRole                  @default(member)
-  avatarUrl                String?
-  avatarPublicId           String?
-  passwordHash             String?
-  passwordResets           PasswordReset[]
-  registryImports          RegistryImport[]
-  registryRecords          RegistryRecord[]
-  sessions                 Session[]
-  twoFactorChallenges      TwoFactorChallenge[]
+  firstName           String
+  lastName            String
+  role                UserRole             @default(member)
+  avatarUrl           String?
+  avatarPublicId      String?
+  passwordHash        String?
+  passwordResets      PasswordReset[]
+  registryImports     RegistryImport[]
+  registryRecords     RegistryRecord[]
+  sessions            Session[]
+  twoFactorChallenges TwoFactorChallenge[]
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -152,47 +152,50 @@ model RegistryImport {
 }
 
 model RegistryRecord {
-  id       String @id @default(cuid())
+  id       String         @id @default(cuid())
   userId   String
   importId String
   user     User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   import   RegistryImport @relation(fields: [importId], references: [id], onDelete: Cascade)
 
-  rowNumber             Int      @map("row_number")
-  sellerRegionCode      String?  @map("seller_region_code")
-  sellerDistrictCode    String?  @map("seller_district_code")
-  sellerTaxNumber       String?  @map("seller_tax_number")
-  sellerIpn             String?  @map("seller_ipn")
-  sellerName            String?  @map("seller_name") @db.Text
-  sellerStatus          String?  @map("seller_status")
-  buyerRegionCode       String?  @map("buyer_region_code")
-  buyerDistrictCode     String?  @map("buyer_district_code")
-  buyerTaxNumber        String?  @map("buyer_tax_number")
-  buyerIpn              String?  @map("buyer_ipn")
-  buyerName             String?  @map("buyer_name") @db.Text
-  buyerStatus           String?  @map("buyer_status")
-  registrationNumber    String?  @map("registration_number")
-  invoiceNumber         String?  @map("invoice_number")
-  invoiceDate           DateTime? @map("invoice_date")
-  registrationDate      DateTime? @map("registration_date")
-  erpnStatus            String?  @map("erpn_status")
-  isExcluded            Boolean? @map("is_excluded")
-  totalAmountPayable    Decimal? @map("total_amount_payable") @db.Decimal(18, 2)
-  totalVatAmount        Decimal? @map("total_vat_amount") @db.Decimal(18, 2)
-  supplyAmount20        Decimal? @map("supply_amount_20") @db.Decimal(18, 2)
-  supplyAmount14        Decimal? @map("supply_amount_14") @db.Decimal(18, 2)
-  supplyAmount7         Decimal? @map("supply_amount_7") @db.Decimal(18, 2)
-  adjustmentCount       Int?     @map("adjustment_count")
-  adjustmentAmount      Decimal? @map("adjustment_amount") @db.Decimal(18, 2)
-  unitPriceDeclared     Decimal? @map("unit_price_declared") @db.Decimal(18, 2)
-  itemDescription       String?  @map("item_description") @db.Text
-  uktzedCode            String?  @map("uktzed_code")
-  dkppCode              String?  @map("dkpp_code")
-  unitName              String?  @map("unit_name")
-  quantity              Decimal? @map("quantity") @db.Decimal(18, 3)
-  unitPriceActual       Decimal? @map("unit_price_actual") @db.Decimal(18, 2)
-  supplyAmountWithoutVat Decimal? @map("supply_amount_without_vat") @db.Decimal(18, 2)
-  vatAmount             Decimal? @map("vat_amount") @db.Decimal(18, 2)
+  rowNumber              Int       @map("row_number")
+  sellerRegionCode       String?   @map("seller_region_code")
+  sellerDistrictCode     String?   @map("seller_district_code")
+  sellerTaxNumber        String?   @map("seller_tax_number")
+  sellerIpn              String?   @map("seller_ipn")
+  sellerName             String?   @map("seller_name") @db.Text
+  sellerStatus           String?   @map("seller_status")
+  buyerRegionCode        String?   @map("buyer_region_code")
+  buyerDistrictCode      String?   @map("buyer_district_code")
+  buyerTaxNumber         String?   @map("buyer_tax_number")
+  buyerIpn               String?   @map("buyer_ipn")
+  buyerName              String?   @map("buyer_name") @db.Text
+  buyerStatus            String?   @map("buyer_status")
+  registrationNumber     String?   @map("registration_number")
+  invoiceNumber          String?   @map("invoice_number")
+  invoiceDate            DateTime? @map("invoice_date")
+  registrationDate       DateTime? @map("registration_date")
+  erpnStatus             String?   @map("erpn_status")
+  isExcluded             Boolean?  @map("is_excluded")
+  totalAmountPayable     Decimal?  @map("total_amount_payable") @db.Decimal(18, 2)
+  totalVatAmount         Decimal?  @map("total_vat_amount") @db.Decimal(18, 2)
+  supplyAmount20         Decimal?  @map("supply_amount_20") @db.Decimal(18, 2)
+  supplyAmount14         Decimal?  @map("supply_amount_14") @db.Decimal(18, 2)
+  supplyAmount7          Decimal?  @map("supply_amount_7") @db.Decimal(18, 2)
+  adjustmentCount        Int?      @map("adjustment_count")
+  adjustmentAmount       Decimal?  @map("adjustment_amount") @db.Decimal(18, 2)
+  unitPriceDeclared      Decimal?  @map("unit_price_declared") @db.Decimal(18, 2)
+  itemDescription        String?   @map("item_description") @db.Text
+  uktzedCode             String?   @map("uktzed_code")
+  dkppCode               String?   @map("dkpp_code")
+  unitName               String?   @map("unit_name")
+  quantity               Decimal?  @map("quantity") @db.Decimal(18, 3)
+  unitPriceActual        Decimal?  @map("unit_price_actual") @db.Decimal(18, 2)
+  supplyAmountWithoutVat Decimal?  @map("supply_amount_without_vat") @db.Decimal(18, 2)
+  vatAmount              Decimal?  @map("vat_amount") @db.Decimal(18, 2)
+  operationFingerprint   String    @map("operation_fingerprint")
+  duplicateGroupKey      String    @map("duplicate_group_key")
+  isCanonical            Boolean   @default(true) @map("is_canonical")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -211,4 +214,7 @@ model RegistryRecord {
   @@index([userId, buyerRegionCode])
   @@index([userId, sellerDistrictCode])
   @@index([userId, buyerDistrictCode])
+  @@index([userId, operationFingerprint])
+  @@index([userId, duplicateGroupKey])
+  @@index([userId, isCanonical])
 }

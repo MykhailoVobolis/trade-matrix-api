@@ -63,6 +63,12 @@ type RegistryRecordListItem = {
   createdAt: Date;
 };
 
+type RegistryRecordCreateInputDraft = Prisma.RegistryRecordCreateManyInput & {
+  operationFingerprint: string;
+  duplicateGroupKey: string;
+  isCanonical: boolean;
+};
+
 @Injectable()
 export class RegistryImportService {
   constructor(
@@ -367,7 +373,15 @@ export class RegistryImportService {
       const parsedRows = dataRows.map((row, index) =>
         this.mapRowToParsedRecord(row, index + 2, columnIndexes),
       );
-      await this.persistParsedRows(importId, userId, parsedRows);
+      const operationFingerprints = await this.persistParsedRows(
+        importId,
+        userId,
+        parsedRows,
+      );
+      await this.registryImportRepository.reconcileCanonicalRecords(
+        userId,
+        operationFingerprints,
+      );
       const completedImport = await this.registryImportRepository.markCompleted(
         importId,
         parsedRows.length,
@@ -470,7 +484,9 @@ export class RegistryImportService {
     importId: string,
     userId: string,
     parsedRows: ParsedRegistryRecord[],
-  ): Promise<void> {
+  ): Promise<string[]> {
+    const operationFingerprints = new Set<string>();
+
     for (
       let index = 0;
       index < parsedRows.length;
@@ -479,18 +495,60 @@ export class RegistryImportService {
       const batch = parsedRows
         .slice(index, index + REGISTRY_IMPORT_INSERT_BATCH_SIZE)
         .map((row) =>
-          this.toRegistryRecordCreateManyInput(importId, userId, row),
+          this.toRegistryRecordCreateManyInputDraft(importId, userId, row),
         );
+
+      batch.forEach((row) => {
+        operationFingerprints.add(row.operationFingerprint);
+      });
 
       await this.registryImportRepository.createManyRecords(batch);
     }
+
+    return [...operationFingerprints];
   }
 
-  private toRegistryRecordCreateManyInput(
+  private toRegistryRecordCreateManyInputDraft(
     importId: string,
     userId: string,
     row: ParsedRegistryRecord,
-  ): Prisma.RegistryRecordCreateManyInput {
+  ): RegistryRecordCreateInputDraft {
+    const sellerTaxNumber = this.toOptionalNumericIdentifier(
+      row.sellerTaxNumber,
+    );
+    const sellerIpn = this.toOptionalNumericIdentifier(row.sellerIpn);
+    const buyerTaxNumber = this.toOptionalNumericIdentifier(row.buyerTaxNumber);
+    const buyerIpn = this.toOptionalNumericIdentifier(row.buyerIpn);
+    const registrationNumber = this.toOptionalString(row.registrationNumber);
+    const invoiceNumber = this.toOptionalString(row.invoiceNumber);
+    const invoiceDate = this.toOptionalDate(row.invoiceDate);
+    const supplyAmountWithoutVat = this.toOptionalDecimal(
+      row.supplyAmountWithoutVat,
+    );
+    const vatAmount = this.toOptionalDecimal(row.vatAmount);
+    const itemDescription = this.toOptionalString(row.itemDescription);
+    const unitName = this.toOptionalString(row.unitName);
+    const quantity = this.toOptionalDecimal(row.quantity);
+    const uktzedCode = this.normalizeUktzedCode(row.uktzedCode);
+    const amountWithVat = this.sumDecimalStrings(
+      supplyAmountWithoutVat,
+      vatAmount,
+    );
+    const operationFingerprint = this.buildOperationFingerprint({
+      registrationNumber,
+      invoiceNumber,
+      invoiceDate,
+      sellerTaxNumber,
+      buyerTaxNumber,
+      itemDescription,
+      unitName,
+      quantity,
+      supplyAmountWithoutVat,
+      vatAmount,
+      amountWithVat,
+      uktzedCode,
+    });
+
     return {
       id: randomUUID(),
       userId,
@@ -498,19 +556,19 @@ export class RegistryImportService {
       rowNumber: row.rowNumber,
       sellerRegionCode: this.toOptionalString(row.sellerRegionCode),
       sellerDistrictCode: this.toOptionalString(row.sellerDistrictCode),
-      sellerTaxNumber: this.toOptionalNumericIdentifier(row.sellerTaxNumber),
-      sellerIpn: this.toOptionalNumericIdentifier(row.sellerIpn),
+      sellerTaxNumber,
+      sellerIpn,
       sellerName: this.toOptionalString(row.sellerName),
       sellerStatus: this.toOptionalString(row.sellerStatus),
       buyerRegionCode: this.toOptionalString(row.buyerRegionCode),
       buyerDistrictCode: this.toOptionalString(row.buyerDistrictCode),
-      buyerTaxNumber: this.toOptionalNumericIdentifier(row.buyerTaxNumber),
-      buyerIpn: this.toOptionalNumericIdentifier(row.buyerIpn),
+      buyerTaxNumber,
+      buyerIpn,
       buyerName: this.toOptionalString(row.buyerName),
       buyerStatus: this.toOptionalString(row.buyerStatus),
-      registrationNumber: this.toOptionalString(row.registrationNumber),
-      invoiceNumber: this.toOptionalString(row.invoiceNumber),
-      invoiceDate: this.toOptionalDate(row.invoiceDate),
+      registrationNumber,
+      invoiceNumber,
+      invoiceDate,
       registrationDate: this.toOptionalDate(row.registrationDate),
       erpnStatus: this.toOptionalString(row.erpnStatus),
       isExcluded: this.toOptionalBoolean(row.isExcluded),
@@ -522,16 +580,17 @@ export class RegistryImportService {
       adjustmentCount: this.toOptionalInt(row.adjustmentCount),
       adjustmentAmount: this.toOptionalDecimal(row.adjustmentAmount),
       unitPriceDeclared: this.toOptionalDecimal(row.unitPriceDeclared),
-      itemDescription: this.toOptionalString(row.itemDescription),
-      uktzedCode: this.toOptionalString(row.uktzedCode),
+      itemDescription,
+      uktzedCode,
       dkppCode: this.toOptionalString(row.dkppCode),
-      unitName: this.toOptionalString(row.unitName),
-      quantity: this.toOptionalDecimal(row.quantity),
+      unitName,
+      quantity,
       unitPriceActual: this.toOptionalDecimal(row.unitPriceActual),
-      supplyAmountWithoutVat: this.toOptionalDecimal(
-        row.supplyAmountWithoutVat,
-      ),
-      vatAmount: this.toOptionalDecimal(row.vatAmount),
+      supplyAmountWithoutVat,
+      vatAmount,
+      operationFingerprint,
+      duplicateGroupKey: operationFingerprint,
+      isCanonical: true,
     };
   }
 
@@ -570,9 +629,13 @@ export class RegistryImportService {
   }
 
   private toOptionalString(value: string | undefined): string | null {
-    const normalized = value?.trim();
+    const normalized = value?.normalize('NFC').trim();
 
     return normalized ? normalized : null;
+  }
+
+  private normalizeWhitespace(value: string): string {
+    return value.replace(/\s+/gu, ' ').trim();
   }
 
   private toOptionalNumericIdentifier(
@@ -637,7 +700,11 @@ export class RegistryImportService {
 
     const decimal = normalized.replaceAll(' ', '').replace(',', '.');
 
-    return /^-?\d+(?:\.\d+)?$/u.test(decimal) ? decimal : null;
+    if (!/^-?\d+(?:\.\d+)?$/u.test(decimal)) {
+      return null;
+    }
+
+    return this.normalizeDecimalString(decimal);
   }
 
   private toOptionalInt(value: string | undefined): number | null {
@@ -693,6 +760,83 @@ export class RegistryImportService {
     const isoDate = new Date(normalized);
 
     return Number.isNaN(isoDate.getTime()) ? null : isoDate;
+  }
+
+  private normalizeUktzedCode(value: string | undefined): string | null {
+    const normalized = this.toOptionalString(value);
+
+    if (!normalized) {
+      return null;
+    }
+
+    return this.normalizeWhitespace(normalized).replace(/\.0+$/u, '');
+  }
+
+  private normalizeDecimalString(value: string): string {
+    return new Prisma.Decimal(value).toFixed();
+  }
+
+  private sumDecimalStrings(
+    left: string | null,
+    right: string | null,
+  ): string | null {
+    if (!left && !right) {
+      return null;
+    }
+
+    const total = new Prisma.Decimal(left ?? '0').plus(
+      new Prisma.Decimal(right ?? '0'),
+    );
+
+    return total.toFixed();
+  }
+
+  private formatDateForFingerprint(value: Date | null): string {
+    if (!value) {
+      return '';
+    }
+
+    return value.toISOString().slice(0, 10);
+  }
+
+  private normalizeTextForFingerprint(value: string | null): string {
+    return value ? this.normalizeWhitespace(value.normalize('NFC')) : '';
+  }
+
+  private normalizeNumericForFingerprint(value: string | null): string {
+    return value ? this.normalizeDecimalString(value) : '';
+  }
+
+  private buildOperationFingerprint(parts: {
+    registrationNumber: string | null;
+    invoiceNumber: string | null;
+    invoiceDate: Date | null;
+    sellerTaxNumber: string | null;
+    buyerTaxNumber: string | null;
+    itemDescription: string | null;
+    unitName: string | null;
+    quantity: string | null;
+    supplyAmountWithoutVat: string | null;
+    vatAmount: string | null;
+    amountWithVat: string | null;
+    uktzedCode: string | null;
+  }): string {
+    const fingerprintPayload = [
+      this.normalizeTextForFingerprint(parts.registrationNumber),
+      this.normalizeTextForFingerprint(parts.invoiceNumber),
+      this.formatDateForFingerprint(parts.invoiceDate),
+      this.normalizeTextForFingerprint(parts.sellerTaxNumber),
+      this.normalizeTextForFingerprint(parts.buyerTaxNumber),
+      this.normalizeTextForFingerprint(parts.itemDescription),
+      this.normalizeTextForFingerprint(parts.unitName),
+      this.normalizeNumericForFingerprint(parts.quantity),
+      this.normalizeNumericForFingerprint(parts.supplyAmountWithoutVat),
+      this.normalizeNumericForFingerprint(parts.vatAmount),
+      this.normalizeNumericForFingerprint(parts.amountWithVat),
+      this.normalizeTextForFingerprint(parts.uktzedCode),
+    ].join('|');
+
+    return createHash('sha256').update(fingerprintPayload).digest('hex');
   }
 
   private buildRegistryRecordWhere(
