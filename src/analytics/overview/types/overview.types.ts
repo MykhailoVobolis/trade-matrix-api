@@ -90,3 +90,26 @@ export type AnalyticsMarketStructure = {
   top5BuyersShare: number;
   top5SuppliersShare: number;
 };
+
+export type AnalyticsTopEntity = {
+  id: string | null;
+  name: string | null;
+  amount: number;
+  share: number;
+};
+
+export type AnalyticsTopProduct = {
+  productId: string | null;
+  name: string | null;
+  uktzed: string | null;
+  amount: number;
+  share: number;
+};
+
+export type AnalyticsTopRegion = {
+  regionCode: string | null;
+  regionName: string | null;
+  amount: number;
+  share: number;
+  activeBuyers: number;
+};

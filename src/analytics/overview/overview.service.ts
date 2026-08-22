@@ -24,6 +24,9 @@ import type {
   AnalyticsComparisonMode,
   AnalyticsMarketStructure,
   AnalyticsTimeGrain,
+  AnalyticsTopEntity,
+  AnalyticsTopProduct,
+  AnalyticsTopRegion,
   AnalyticsTrendPoint,
 } from './types/overview.types';
 
@@ -65,11 +68,27 @@ export class OverviewService {
         : Promise.resolve(null),
       this.overviewRepository.getTrendPoints(scope, resolved.timeGrain),
       this.overviewRepository.getMarketStructure(scope),
+      this.overviewRepository.getTopBuyers(scope),
+      this.overviewRepository.getTopSuppliers(scope),
+      this.overviewRepository.getTopProducts(scope),
+      this.overviewRepository.getTopRegions(scope),
       comparisonScope
         ? this.overviewRepository.getTrendPoints(
             comparisonScope,
             resolved.timeGrain,
           )
+        : Promise.resolve([]),
+      comparisonScope
+        ? this.overviewRepository.getTopBuyers(comparisonScope)
+        : Promise.resolve([]),
+      comparisonScope
+        ? this.overviewRepository.getTopSuppliers(comparisonScope)
+        : Promise.resolve([]),
+      comparisonScope
+        ? this.overviewRepository.getTopProducts(comparisonScope)
+        : Promise.resolve([]),
+      comparisonScope
+        ? this.overviewRepository.getTopRegions(comparisonScope)
         : Promise.resolve([]),
     ]).then(
       ([
@@ -77,7 +96,15 @@ export class OverviewService {
         previousKpi,
         currentTrend,
         marketStructure,
+        topBuyers,
+        topSuppliers,
+        topProducts,
+        topRegions,
         comparisonTrend,
+        previousTopBuyers,
+        previousTopSuppliers,
+        previousTopProducts,
+        previousTopRegions,
       ]) => ({
         period: this.toPeriod(resolved),
         comparison: this.toComparison(resolved),
@@ -88,10 +115,10 @@ export class OverviewService {
           resolved.timeGrain,
         ),
         marketStructure,
-        topBuyers: [],
-        topSuppliers: [],
-        topProducts: [],
-        topRegions: [],
+        topBuyers: this.buildTopEntities(topBuyers, previousTopBuyers),
+        topSuppliers: this.buildTopEntities(topSuppliers, previousTopSuppliers),
+        topProducts: this.buildTopProducts(topProducts, previousTopProducts),
+        topRegions: this.buildTopRegions(topRegions, previousTopRegions),
         insights: [],
       }),
     );
@@ -128,6 +155,87 @@ export class OverviewService {
         purchasesWithVat: point.purchasesWithVat,
         comparisonSalesWithVat: comparisonPoint?.salesWithVat ?? null,
         comparisonPurchasesWithVat: comparisonPoint?.purchasesWithVat ?? null,
+      };
+    });
+  }
+
+  private buildTopEntities(
+    current: AnalyticsTopEntity[],
+    previous: AnalyticsTopEntity[],
+  ) {
+    const previousById = new Map(
+      previous.map((item) => [item.id ?? item.name ?? '', item]),
+    );
+
+    return current.map((item) => {
+      const previousItem = previousById.get(item.id ?? item.name ?? '') ?? null;
+
+      return {
+        id: item.id,
+        name: item.name,
+        amount: item.amount,
+        share: item.share,
+        previousAmount: previousItem?.amount ?? null,
+        deltaPercent: this.calculateDeltaPercent(
+          item.amount,
+          previousItem?.amount ?? 0,
+        ),
+      };
+    });
+  }
+
+  private buildTopProducts(
+    current: AnalyticsTopProduct[],
+    previous: AnalyticsTopProduct[],
+  ) {
+    const previousByKey = new Map(
+      previous.map((item) => [
+        `${item.name ?? ''}::${item.uktzed ?? ''}`,
+        item,
+      ]),
+    );
+
+    return current.map((item) => {
+      const key = `${item.name ?? ''}::${item.uktzed ?? ''}`;
+      const previousItem = previousByKey.get(key) ?? null;
+
+      return {
+        productId: item.productId,
+        name: item.name,
+        uktzed: item.uktzed,
+        amount: item.amount,
+        share: item.share,
+        previousAmount: previousItem?.amount ?? null,
+        deltaPercent: this.calculateDeltaPercent(
+          item.amount,
+          previousItem?.amount ?? 0,
+        ),
+      };
+    });
+  }
+
+  private buildTopRegions(
+    current: AnalyticsTopRegion[],
+    previous: AnalyticsTopRegion[],
+  ) {
+    const previousByCode = new Map(
+      previous.map((item) => [item.regionCode ?? '', item]),
+    );
+
+    return current.map((item) => {
+      const previousItem = previousByCode.get(item.regionCode ?? '') ?? null;
+
+      return {
+        regionCode: item.regionCode,
+        regionName: item.regionName,
+        amount: item.amount,
+        share: item.share,
+        activeBuyers: item.activeBuyers,
+        previousAmount: previousItem?.amount ?? null,
+        deltaPercent: this.calculateDeltaPercent(
+          item.amount,
+          previousItem?.amount ?? 0,
+        ),
       };
     });
   }

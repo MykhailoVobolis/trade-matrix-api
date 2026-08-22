@@ -70,6 +70,72 @@ export class OverviewRankingItemDto {
   share: number;
 }
 
+export class OverviewTopEntityItemDto {
+  @ApiPropertyOptional({ example: '1234567890', nullable: true })
+  id: string | null;
+
+  @ApiPropertyOptional({ example: 'МЕГАРОСТ', nullable: true })
+  name: string | null;
+
+  @ApiProperty({ example: 0 })
+  amount: number;
+
+  @ApiProperty({ example: 0 })
+  share: number;
+
+  @ApiPropertyOptional({ example: 0, nullable: true })
+  previousAmount: number | null;
+
+  @ApiPropertyOptional({ example: 0, nullable: true })
+  deltaPercent: number | null;
+}
+
+export class OverviewTopProductItemDto {
+  @ApiPropertyOptional({ example: null, nullable: true })
+  productId: string | null;
+
+  @ApiPropertyOptional({ example: 'Літол-24', nullable: true })
+  name: string | null;
+
+  @ApiPropertyOptional({ example: '2710', nullable: true })
+  uktzed: string | null;
+
+  @ApiProperty({ example: 0 })
+  amount: number;
+
+  @ApiProperty({ example: 0 })
+  share: number;
+
+  @ApiPropertyOptional({ example: 0, nullable: true })
+  previousAmount: number | null;
+
+  @ApiPropertyOptional({ example: 0, nullable: true })
+  deltaPercent: number | null;
+}
+
+export class OverviewTopRegionItemDto {
+  @ApiPropertyOptional({ example: '10', nullable: true })
+  regionCode: string | null;
+
+  @ApiPropertyOptional({ example: null, nullable: true })
+  regionName: string | null;
+
+  @ApiProperty({ example: 0 })
+  amount: number;
+
+  @ApiProperty({ example: 0 })
+  share: number;
+
+  @ApiProperty({ example: 0 })
+  activeBuyers: number;
+
+  @ApiPropertyOptional({ example: 0, nullable: true })
+  previousAmount: number | null;
+
+  @ApiPropertyOptional({ example: 0, nullable: true })
+  deltaPercent: number | null;
+}
+
 export class OverviewMarketEntityDto {
   @ApiPropertyOptional({ example: '1234567890', nullable: true })
   id: string | null;
@@ -164,17 +230,17 @@ export class OverviewResponseDto {
   @ApiProperty({ type: OverviewMarketStructureDto })
   marketStructure: OverviewMarketStructureDto;
 
-  @ApiProperty({ type: OverviewRankingItemDto, isArray: true })
-  topBuyers: OverviewRankingItemDto[];
+  @ApiProperty({ type: OverviewTopEntityItemDto, isArray: true })
+  topBuyers: OverviewTopEntityItemDto[];
 
-  @ApiProperty({ type: OverviewRankingItemDto, isArray: true })
-  topSuppliers: OverviewRankingItemDto[];
+  @ApiProperty({ type: OverviewTopEntityItemDto, isArray: true })
+  topSuppliers: OverviewTopEntityItemDto[];
 
-  @ApiProperty({ type: OverviewRankingItemDto, isArray: true })
-  topProducts: OverviewRankingItemDto[];
+  @ApiProperty({ type: OverviewTopProductItemDto, isArray: true })
+  topProducts: OverviewTopProductItemDto[];
 
-  @ApiProperty({ type: OverviewRankingItemDto, isArray: true })
-  topRegions: OverviewRankingItemDto[];
+  @ApiProperty({ type: OverviewTopRegionItemDto, isArray: true })
+  topRegions: OverviewTopRegionItemDto[];
 
   @ApiProperty({ type: OverviewInsightDto, isArray: true })
   insights: OverviewInsightDto[];
