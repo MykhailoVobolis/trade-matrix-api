@@ -107,3 +107,22 @@ export type SuppliersAnalyticsTopRegion = {
   share: number;
   activeBuyers: number;
 };
+
+export type SuppliersAnalyticsTableItem = {
+  periodStart: Date;
+  buyerRegionCode: string | null;
+  buyerTaxNumber: string | null;
+  buyerName: string | null;
+  product: string | null;
+  uktzed: string | null;
+  unit: string | null;
+  quantity: number | null;
+  priceWithVat: number | null;
+  salesWithVat: number;
+  marketShare: number;
+};
+
+export type SuppliersAnalyticsTableResult = {
+  items: SuppliersAnalyticsTableItem[];
+  total: number;
+};

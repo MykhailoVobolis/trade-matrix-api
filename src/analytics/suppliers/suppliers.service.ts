@@ -6,6 +6,8 @@ import {
   SUPPLIERS_ANALYTICS_DEFAULT_FILTER_OPTIONS_PAGE,
   SUPPLIERS_ANALYTICS_DEFAULT_TABLE_LIMIT,
   SUPPLIERS_ANALYTICS_DEFAULT_TABLE_PAGE,
+  SUPPLIERS_ANALYTICS_DEFAULT_TABLE_SORT_DIRECTION,
+  SUPPLIERS_ANALYTICS_DEFAULT_TABLE_SORT_FIELD,
   SUPPLIERS_ANALYTICS_EXPORT_FORMATS,
 } from './constants/suppliers.constants';
 import { SuppliersExportQueryDto } from './dto/suppliers-export-query.dto';
@@ -131,22 +133,51 @@ export class SuppliersService {
     query: SuppliersTableQueryDto,
   ): Promise<SuppliersTableResponseDto> {
     const scope = this.suppliersRepository.createBaseScope(user.userId, query);
+    const resolved = this.resolveSuppliersContext(query);
+    const page = query.page ?? SUPPLIERS_ANALYTICS_DEFAULT_TABLE_PAGE;
+    const limit = query.limit ?? SUPPLIERS_ANALYTICS_DEFAULT_TABLE_LIMIT;
+    const sortBy = query.sortBy ?? SUPPLIERS_ANALYTICS_DEFAULT_TABLE_SORT_FIELD;
+    const sortDirection =
+      query.sortDirection ?? SUPPLIERS_ANALYTICS_DEFAULT_TABLE_SORT_DIRECTION;
 
     if (!this.suppliersRepository.hasSelectedSuppliers(scope)) {
       return Promise.resolve({
         items: [],
         total: 0,
-        page: query.page ?? SUPPLIERS_ANALYTICS_DEFAULT_TABLE_PAGE,
-        limit: query.limit ?? SUPPLIERS_ANALYTICS_DEFAULT_TABLE_LIMIT,
+        page,
+        limit,
       });
     }
 
-    return Promise.resolve({
-      items: [],
-      total: 0,
-      page: query.page ?? SUPPLIERS_ANALYTICS_DEFAULT_TABLE_PAGE,
-      limit: query.limit ?? SUPPLIERS_ANALYTICS_DEFAULT_TABLE_LIMIT,
-    });
+    return this.suppliersRepository
+      .getSuppliersTable(scope, {
+        timeGrain: resolved.timeGrain,
+        page,
+        limit,
+        sortBy,
+        sortDirection,
+      })
+      .then((result) => ({
+        items: result.items.map((item) => ({
+          period: this.formatTablePeriod(item.periodStart, resolved.timeGrain),
+          buyerRegionCode: item.buyerRegionCode,
+          buyerRegionName: this.suppliersRepository.resolveRegionName(
+            item.buyerRegionCode,
+          ),
+          buyerTaxNumber: item.buyerTaxNumber,
+          buyerName: item.buyerName,
+          product: item.product,
+          uktzed: item.uktzed,
+          unit: item.unit,
+          quantity: item.quantity,
+          priceWithVat: item.priceWithVat,
+          salesWithVat: item.salesWithVat,
+          marketShare: item.marketShare,
+        })),
+        total: result.total,
+        page,
+        limit,
+      }));
   }
 
   getFilterOptions(
@@ -753,6 +784,23 @@ export class SuppliersService {
         return `${year}-${String(month).padStart(2, '0')}`;
       case 'QUARTER':
         return `Q${Math.floor((month - 1) / 3) + 1} ${year}`;
+      case 'YEAR':
+        return String(year);
+    }
+  }
+
+  private formatTablePeriod(
+    value: Date,
+    timeGrain: SuppliersAnalyticsTimeGrain,
+  ): string {
+    const year = value.getUTCFullYear();
+    const month = value.getUTCMonth() + 1;
+
+    switch (timeGrain) {
+      case 'MONTH':
+        return `${year}-${String(month).padStart(2, '0')}`;
+      case 'QUARTER':
+        return `${year}-Q${Math.floor((month - 1) / 3) + 1}`;
       case 'YEAR':
         return String(year);
     }
