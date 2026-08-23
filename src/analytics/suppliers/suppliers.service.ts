@@ -112,7 +112,16 @@ export class SuppliersService {
         topBuyers: this.buildTopEntities(topBuyers, previousTopBuyers),
         topProducts: this.buildTopProducts(topProducts, previousTopProducts),
         topRegions: this.buildTopRegions(topRegions, previousTopRegions),
-        insights: [],
+        insights: this.buildInsights({
+          kpi: this.buildKpi(currentKpi, previousKpi),
+          trend: this.buildTrend(
+            currentTrend,
+            comparisonTrend,
+            resolved.timeGrain,
+          ),
+          marketStructure,
+          topRegions: this.buildTopRegions(topRegions, previousTopRegions),
+        }),
       }),
     );
   }
@@ -425,6 +434,128 @@ export class SuppliersService {
         ),
       };
     });
+  }
+
+  private buildInsights(input: {
+    kpi: Record<
+      string,
+      {
+        current: number;
+        previous: number | null;
+        deltaPercent: number | null;
+        hasComparablePrevious: boolean;
+      }
+    >;
+    trend: Array<{
+      periodStart: string;
+      periodLabel: string;
+      salesWithVat: number;
+      purchasesWithVat: number;
+      comparisonSalesWithVat: number | null;
+      comparisonPurchasesWithVat: number | null;
+    }>;
+    marketStructure: {
+      topBuyer: {
+        id: string | null;
+        name: string | null;
+        amount: number;
+        share: number;
+      } | null;
+      topBuyerRegion: {
+        regionCode: string | null;
+        regionName: string | null;
+        amount: number;
+        share: number;
+      } | null;
+      topUKTZED: {
+        code: string | null;
+        name: string | null;
+        description: string | null;
+        amount: number;
+        share: number;
+      } | null;
+      top5BuyersShare: number | null;
+    };
+    topRegions: Array<{
+      regionCode: string | null;
+      regionName: string | null;
+      amount: number;
+      share: number;
+      activeBuyers: number;
+      previousAmount: number | null;
+      deltaPercent: number | null;
+    }>;
+  }) {
+    const peakSalesPeriod = this.getPeakSalesPeriod(input.trend);
+    const topRegion =
+      input.marketStructure.topBuyerRegion ?? input.topRegions[0] ?? null;
+    const topRegionDetails = topRegion
+      ? (input.topRegions.find(
+          (item) => item.regionCode === topRegion.regionCode,
+        ) ?? null)
+      : null;
+
+    return [
+      {
+        type: 'SALES_CHANGE',
+        payload: {
+          deltaPercent: input.kpi.salesWithVat.deltaPercent,
+        },
+      },
+      {
+        type: 'PEAK_SALES_PERIOD',
+        payload: {
+          periodLabel: peakSalesPeriod?.periodLabel ?? null,
+          amount: peakSalesPeriod?.amount ?? 0,
+        },
+      },
+      {
+        type: 'BUYER_CONCENTRATION',
+        payload: {
+          top5Share: input.marketStructure.top5BuyersShare,
+          topBuyer: input.marketStructure.topBuyer,
+        },
+      },
+      {
+        type: 'TOP_REGION',
+        payload: {
+          regionCode: topRegion?.regionCode ?? null,
+          regionName: topRegion?.regionName ?? null,
+          amount: topRegion?.amount ?? 0,
+          share: topRegion?.share ?? 0,
+          activeBuyers: topRegionDetails?.activeBuyers ?? 0,
+          previousAmount: topRegionDetails?.previousAmount ?? null,
+          deltaPercent: topRegionDetails?.deltaPercent ?? null,
+        },
+      },
+    ];
+  }
+
+  private getPeakSalesPeriod(
+    trend: Array<{
+      periodStart: string;
+      periodLabel: string;
+      salesWithVat: number;
+      purchasesWithVat: number;
+      comparisonSalesWithVat: number | null;
+      comparisonPurchasesWithVat: number | null;
+    }>,
+  ): {
+    periodLabel: string;
+    amount: number;
+  } | null {
+    if (trend.length === 0) {
+      return null;
+    }
+
+    const peak = trend.reduce((best, item) =>
+      item.salesWithVat > best.salesWithVat ? item : best,
+    );
+
+    return {
+      periodLabel: peak.periodLabel,
+      amount: peak.salesWithVat,
+    };
   }
 
   private buildEmptyExportFile(
