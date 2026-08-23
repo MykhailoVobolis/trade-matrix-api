@@ -63,6 +63,33 @@ export class RegistryImportRepository {
     });
   }
 
+  async reconcileCanonicalRecords(
+    userId: string,
+    operationFingerprints: string[],
+  ): Promise<void> {
+    if (operationFingerprints.length === 0) {
+      return;
+    }
+
+    await this.prisma.$executeRaw`
+      UPDATE "RegistryRecord" AS record
+      SET "is_canonical" = CASE WHEN ranked.row_number = 1 THEN TRUE ELSE FALSE END
+      FROM (
+        SELECT
+          "id",
+          ROW_NUMBER() OVER (
+            PARTITION BY "userId", "operation_fingerprint"
+            ORDER BY "created_at" ASC, "id" ASC
+          ) AS row_number
+        FROM "RegistryRecord"
+        WHERE
+          "userId" = ${userId}
+          AND "operation_fingerprint" IN (${Prisma.join(operationFingerprints)})
+      ) AS ranked
+      WHERE record."id" = ranked."id"
+    `;
+  }
+
   listImports(params: ListRegistryImportsParams) {
     return this.prisma.registryImport.findMany({
       where: {
