@@ -55,3 +55,55 @@ export type SuppliersAnalyticsTrendPoint = {
   periodStart: Date;
   salesWithVat: number;
 };
+
+export type SuppliersAnalyticsMarketEntity = {
+  id: string | null;
+  name: string | null;
+  amount: number;
+  share: number;
+};
+
+export type SuppliersAnalyticsMarketRegion = {
+  regionCode: string | null;
+  regionName: string | null;
+  amount: number;
+  share: number;
+};
+
+export type SuppliersAnalyticsMarketUktzed = {
+  code: string | null;
+  name: string | null;
+  description: string | null;
+  amount: number;
+  share: number;
+};
+
+export type SuppliersAnalyticsMarketStructure = {
+  topBuyer: SuppliersAnalyticsMarketEntity | null;
+  topBuyerRegion: SuppliersAnalyticsMarketRegion | null;
+  topUKTZED: SuppliersAnalyticsMarketUktzed | null;
+  top5BuyersShare: number | null;
+};
+
+export type SuppliersAnalyticsTopEntity = {
+  id: string | null;
+  name: string | null;
+  amount: number;
+  share: number;
+};
+
+export type SuppliersAnalyticsTopProduct = {
+  productId: string | null;
+  name: string | null;
+  uktzed: string | null;
+  amount: number;
+  share: number;
+};
+
+export type SuppliersAnalyticsTopRegion = {
+  regionCode: string | null;
+  regionName: string | null;
+  amount: number;
+  share: number;
+  activeBuyers: number;
+};

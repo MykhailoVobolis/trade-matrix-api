@@ -67,28 +67,54 @@ export class SuppliersService {
         ? this.suppliersRepository.getKpiTotals(comparisonScope)
         : Promise.resolve(null),
       this.suppliersRepository.getTrendPoints(scope, resolved.timeGrain),
+      this.suppliersRepository.getMarketStructure(scope),
+      this.suppliersRepository.getTopBuyers(scope),
+      this.suppliersRepository.getTopProducts(scope),
+      this.suppliersRepository.getTopRegions(scope),
       comparisonScope
         ? this.suppliersRepository.getTrendPoints(
             comparisonScope,
             resolved.timeGrain,
           )
         : Promise.resolve([]),
-    ]).then(([currentKpi, previousKpi, currentTrend, comparisonTrend]) => ({
-      period: this.toPeriod(resolved),
-      comparison: this.toComparison(resolved),
-      kpi: this.buildKpi(currentKpi, previousKpi),
-      trend: this.buildTrend(currentTrend, comparisonTrend, resolved.timeGrain),
-      marketStructure: {
-        topBuyer: null,
-        topBuyerRegion: null,
-        topUKTZED: null,
-        top5BuyersShare: null,
-      },
-      topBuyers: [],
-      topProducts: [],
-      topRegions: [],
-      insights: [],
-    }));
+      comparisonScope
+        ? this.suppliersRepository.getTopBuyers(comparisonScope)
+        : Promise.resolve([]),
+      comparisonScope
+        ? this.suppliersRepository.getTopProducts(comparisonScope)
+        : Promise.resolve([]),
+      comparisonScope
+        ? this.suppliersRepository.getTopRegions(comparisonScope)
+        : Promise.resolve([]),
+    ]).then(
+      ([
+        currentKpi,
+        previousKpi,
+        currentTrend,
+        marketStructure,
+        topBuyers,
+        topProducts,
+        topRegions,
+        comparisonTrend,
+        previousTopBuyers,
+        previousTopProducts,
+        previousTopRegions,
+      ]) => ({
+        period: this.toPeriod(resolved),
+        comparison: this.toComparison(resolved),
+        kpi: this.buildKpi(currentKpi, previousKpi),
+        trend: this.buildTrend(
+          currentTrend,
+          comparisonTrend,
+          resolved.timeGrain,
+        ),
+        marketStructure,
+        topBuyers: this.buildTopEntities(topBuyers, previousTopBuyers),
+        topProducts: this.buildTopProducts(topProducts, previousTopProducts),
+        topRegions: this.buildTopRegions(topRegions, previousTopRegions),
+        insights: [],
+      }),
+    );
   }
 
   getSuppliersTable(
@@ -282,6 +308,121 @@ export class SuppliersService {
         purchasesWithVat: 0,
         comparisonSalesWithVat: comparisonPoint?.salesWithVat ?? null,
         comparisonPurchasesWithVat: null,
+      };
+    });
+  }
+
+  private buildTopEntities(
+    current: Array<{
+      id: string | null;
+      name: string | null;
+      amount: number;
+      share: number;
+    }>,
+    previous: Array<{
+      id: string | null;
+      name: string | null;
+      amount: number;
+      share: number;
+    }>,
+  ) {
+    const previousById = new Map(
+      previous.map((item) => [item.id ?? item.name ?? '', item]),
+    );
+
+    return current.map((item) => {
+      const previousItem = previousById.get(item.id ?? item.name ?? '') ?? null;
+
+      return {
+        id: item.id,
+        name: item.name,
+        amount: item.amount,
+        share: item.share,
+        previousAmount: previousItem?.amount ?? null,
+        deltaPercent: this.calculateDeltaPercent(
+          item.amount,
+          previousItem?.amount ?? 0,
+        ),
+      };
+    });
+  }
+
+  private buildTopProducts(
+    current: Array<{
+      productId: string | null;
+      name: string | null;
+      uktzed: string | null;
+      amount: number;
+      share: number;
+    }>,
+    previous: Array<{
+      productId: string | null;
+      name: string | null;
+      uktzed: string | null;
+      amount: number;
+      share: number;
+    }>,
+  ) {
+    const previousByKey = new Map(
+      previous.map((item) => [
+        `${item.name ?? ''}::${item.uktzed ?? ''}`,
+        item,
+      ]),
+    );
+
+    return current.map((item) => {
+      const key = `${item.name ?? ''}::${item.uktzed ?? ''}`;
+      const previousItem = previousByKey.get(key) ?? null;
+
+      return {
+        productId: item.productId,
+        name: item.name,
+        uktzed: item.uktzed,
+        amount: item.amount,
+        share: item.share,
+        previousAmount: previousItem?.amount ?? null,
+        deltaPercent: this.calculateDeltaPercent(
+          item.amount,
+          previousItem?.amount ?? 0,
+        ),
+      };
+    });
+  }
+
+  private buildTopRegions(
+    current: Array<{
+      regionCode: string | null;
+      regionName: string | null;
+      amount: number;
+      share: number;
+      activeBuyers: number;
+    }>,
+    previous: Array<{
+      regionCode: string | null;
+      regionName: string | null;
+      amount: number;
+      share: number;
+      activeBuyers: number;
+    }>,
+  ) {
+    const previousByCode = new Map(
+      previous.map((item) => [item.regionCode ?? '', item]),
+    );
+
+    return current.map((item) => {
+      const previousItem = previousByCode.get(item.regionCode ?? '') ?? null;
+
+      return {
+        regionCode: item.regionCode,
+        regionName: item.regionName,
+        amount: item.amount,
+        share: item.share,
+        activeBuyers: item.activeBuyers,
+        previousAmount: previousItem?.amount ?? null,
+        deltaPercent: this.calculateDeltaPercent(
+          item.amount,
+          previousItem?.amount ?? 0,
+        ),
       };
     });
   }
