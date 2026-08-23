@@ -24,3 +24,22 @@ export type SuppliersAnalyticsSortDirection =
 
 export type SuppliersAnalyticsExportFormat =
   (typeof SUPPLIERS_ANALYTICS_EXPORT_FORMATS)[number];
+
+export type SuppliersAnalyticsFilterSet = {
+  supplierTaxNumbers: string[];
+  buyerTaxNumbers: string[];
+  buyerRegionCodes: string[];
+  uktzedValues: string[];
+  products: string[];
+};
+
+export type SuppliersAnalyticsDateRange = {
+  from: Date;
+  to: Date;
+};
+
+export type SuppliersAnalyticsBaseScope = {
+  userId: string;
+  dateRange: SuppliersAnalyticsDateRange;
+  filters: SuppliersAnalyticsFilterSet;
+};
