@@ -43,3 +43,15 @@ export type SuppliersAnalyticsBaseScope = {
   dateRange: SuppliersAnalyticsDateRange;
   filters: SuppliersAnalyticsFilterSet;
 };
+
+export type SuppliersAnalyticsKpiTotals = {
+  salesWithVat: number;
+  activeBuyers: number;
+  salesRegions: number;
+  productPositions: number;
+};
+
+export type SuppliersAnalyticsTrendPoint = {
+  periodStart: Date;
+  salesWithVat: number;
+};

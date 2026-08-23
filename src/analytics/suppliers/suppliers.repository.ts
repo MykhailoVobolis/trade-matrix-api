@@ -10,6 +10,9 @@ import type { SuppliersBaseQueryDto } from './dto/suppliers-base-query.dto';
 import type {
   SuppliersAnalyticsBaseScope,
   SuppliersAnalyticsFilterOptionDimension,
+  SuppliersAnalyticsKpiTotals,
+  SuppliersAnalyticsTimeGrain,
+  SuppliersAnalyticsTrendPoint,
 } from './types/suppliers.types';
 
 @Injectable()
@@ -84,6 +87,137 @@ export class SuppliersRepository {
     }
 
     return where;
+  }
+
+  async getKpiTotals(
+    scope: SuppliersAnalyticsBaseScope,
+  ): Promise<SuppliersAnalyticsKpiTotals> {
+    const amountWithVatSql = this.amountWithVatSql();
+    const buyerIdentitySql = this.buildCompanyIdentitySql(
+      'record."buyer_tax_number"',
+      'record."buyer_name"',
+    );
+    const supplierIdentitySql = this.buildCompanyIdentitySql(
+      'record."seller_tax_number"',
+      'record."seller_name"',
+    );
+    const productIdentitySql = this.buildNormalizedProductSql();
+    const whereSql = this.buildBaseScopeSql(scope);
+
+    const [row] = await this.prisma.$queryRaw<
+      Array<{
+        salesWithVat: Prisma.Decimal | null;
+        activeBuyers: bigint | number;
+        salesRegions: bigint | number;
+        productPositions: bigint | number;
+      }>
+    >(Prisma.sql`
+      SELECT
+        COALESCE(
+          SUM(
+            CASE
+              WHEN ${supplierIdentitySql} IS NOT NULL THEN ${amountWithVatSql}
+              ELSE 0
+            END
+          ),
+          0
+        ) AS "salesWithVat",
+        COUNT(
+          DISTINCT CASE
+            WHEN ${supplierIdentitySql} IS NOT NULL THEN ${buyerIdentitySql}
+            ELSE NULL
+          END
+        ) AS "activeBuyers",
+        COUNT(
+          DISTINCT CASE
+            WHEN ${supplierIdentitySql} IS NOT NULL
+             AND record."buyer_region_code" IS NOT NULL
+             AND BTRIM(record."buyer_region_code") <> ''
+            THEN ${this.buildResolvedRegionGroupSql('record."buyer_region_code"')}
+            ELSE NULL
+          END
+        ) AS "salesRegions",
+        COUNT(
+          DISTINCT CASE
+            WHEN ${supplierIdentitySql} IS NOT NULL THEN ${productIdentitySql}
+            ELSE NULL
+          END
+        ) AS "productPositions"
+      FROM "RegistryRecord" AS record
+      WHERE ${whereSql}
+    `);
+
+    return {
+      salesWithVat: Number(row?.salesWithVat ?? 0),
+      activeBuyers: Number(row?.activeBuyers ?? 0),
+      salesRegions: Number(row?.salesRegions ?? 0),
+      productPositions: Number(row?.productPositions ?? 0),
+    };
+  }
+
+  async getTrendPoints(
+    scope: SuppliersAnalyticsBaseScope,
+    timeGrain: SuppliersAnalyticsTimeGrain,
+  ): Promise<SuppliersAnalyticsTrendPoint[]> {
+    const amountWithVatSql = this.amountWithVatSql();
+    const supplierIdentitySql = this.buildCompanyIdentitySql(
+      'record."seller_tax_number"',
+      'record."seller_name"',
+    );
+    const bucketExpressionSql = this.buildBucketExpressionSql(timeGrain);
+    const generateSeriesStart = this.getBucketStartDate(
+      scope.dateRange.from,
+      timeGrain,
+    );
+    const generateSeriesEnd = this.getBucketStartDate(
+      scope.dateRange.to,
+      timeGrain,
+    );
+    const seriesStepSql = this.buildSeriesStepSql(timeGrain);
+    const whereSql = this.buildBaseScopeSql(scope);
+
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        periodStart: Date;
+        salesWithVat: Prisma.Decimal | null;
+      }>
+    >(Prisma.sql`
+      WITH buckets AS (
+        SELECT generate_series(
+          ${generateSeriesStart}::timestamp,
+          ${generateSeriesEnd}::timestamp,
+          ${seriesStepSql}
+        ) AS bucket_start
+      ),
+      aggregated AS (
+        SELECT
+          ${bucketExpressionSql} AS bucket_start,
+          COALESCE(
+            SUM(
+              CASE
+                WHEN ${supplierIdentitySql} IS NOT NULL THEN ${amountWithVatSql}
+                ELSE 0
+              END
+            ),
+            0
+          ) AS sales_with_vat
+        FROM "RegistryRecord" AS record
+        WHERE ${whereSql}
+        GROUP BY 1
+      )
+      SELECT
+        buckets.bucket_start AS "periodStart",
+        COALESCE(aggregated.sales_with_vat, 0) AS "salesWithVat"
+      FROM buckets
+      LEFT JOIN aggregated
+        ON aggregated.bucket_start = buckets.bucket_start
+      ORDER BY buckets.bucket_start ASC
+    `);
+
+    return rows.map((row) => ({
+      periodStart: row.periodStart,
+      salesWithVat: Number(row.salesWithVat ?? 0),
+    }));
   }
 
   async getFilterOptions(
@@ -634,6 +768,20 @@ export class SuppliersRepository {
     `;
   }
 
+  private buildNormalizedProductSql(): Prisma.Sql {
+    return Prisma.sql`
+      NULLIF(
+        REGEXP_REPLACE(
+          BTRIM(COALESCE(record."item_description", '')),
+          '\\s+',
+          ' ',
+          'g'
+        ),
+        ''
+      )
+    `;
+  }
+
   private buildOutputProductSql(): Prisma.Sql {
     return Prisma.sql`
       NULLIF(BTRIM(COALESCE(record."item_description", '')), '')
@@ -756,5 +904,58 @@ export class SuppliersRepository {
 
   private toEndOfDayUtc(date: string): Date {
     return new Date(`${date}T23:59:59.999Z`);
+  }
+
+  private amountWithVatSql(): Prisma.Sql {
+    return Prisma.sql`COALESCE(record."supply_amount_without_vat", 0) + COALESCE(record."vat_amount", 0)`;
+  }
+
+  private buildBucketExpressionSql(
+    timeGrain: SuppliersAnalyticsTimeGrain,
+  ): Prisma.Sql {
+    switch (timeGrain) {
+      case 'MONTH':
+        return Prisma.sql`date_trunc('month', record."invoice_date"::date::timestamp)`;
+      case 'QUARTER':
+        return Prisma.sql`date_trunc('quarter', record."invoice_date"::date::timestamp)`;
+      case 'YEAR':
+        return Prisma.sql`date_trunc('year', record."invoice_date"::date::timestamp)`;
+    }
+  }
+
+  private buildSeriesStepSql(
+    timeGrain: SuppliersAnalyticsTimeGrain,
+  ): Prisma.Sql {
+    switch (timeGrain) {
+      case 'MONTH':
+        return Prisma.sql`'1 month'::interval`;
+      case 'QUARTER':
+        return Prisma.sql`'3 months'::interval`;
+      case 'YEAR':
+        return Prisma.sql`'1 year'::interval`;
+    }
+  }
+
+  private getBucketStartDate(
+    date: Date,
+    timeGrain: SuppliersAnalyticsTimeGrain,
+  ): Date {
+    const bucketStart = new Date(date);
+    bucketStart.setUTCHours(0, 0, 0, 0);
+
+    switch (timeGrain) {
+      case 'MONTH':
+        bucketStart.setUTCDate(1);
+        return bucketStart;
+      case 'QUARTER': {
+        const month = bucketStart.getUTCMonth();
+        const quarterStartMonth = Math.floor(month / 3) * 3;
+        bucketStart.setUTCMonth(quarterStartMonth, 1);
+        return bucketStart;
+      }
+      case 'YEAR':
+        bucketStart.setUTCMonth(0, 1);
+        return bucketStart;
+    }
   }
 }
