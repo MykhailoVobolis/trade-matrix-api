@@ -4,12 +4,7 @@ export const ANALYTICS_COMPARISON_MODES = [
   'CUSTOM',
 ] as const;
 
-export const ANALYTICS_TIME_GRAINS = [
-  'DAY',
-  'WEEK',
-  'MONTH',
-  'QUARTER',
-] as const;
+export const ANALYTICS_TIME_GRAINS = ['MONTH', 'QUARTER', 'YEAR'] as const;
 
 export const ANALYTICS_FILTER_OPTION_DIMENSIONS = [
   'buyers',
@@ -30,7 +25,6 @@ export const ANALYTICS_TABLE_SORT_FIELDS = [
   'quantity',
   'priceWithVat',
   'salesWithVat',
-  'purchasesWithVat',
   'marketShare',
 ] as const;
 

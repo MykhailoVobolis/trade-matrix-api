@@ -127,7 +127,6 @@ export type AnalyticsOverviewTableItem = {
   quantity: number | null;
   priceWithVat: number | null;
   salesWithVat: number;
-  purchasesWithVat: number;
   marketShare: number;
 };
 

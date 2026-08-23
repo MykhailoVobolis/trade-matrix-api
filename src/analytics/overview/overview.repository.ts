@@ -517,7 +517,6 @@ export class OverviewRepository {
         quantity: Prisma.Decimal | null;
         priceWithVat: Prisma.Decimal | null;
         salesWithVat: Prisma.Decimal | null;
-        purchasesWithVat: Prisma.Decimal | null;
         marketShare: Prisma.Decimal | null;
         totalCount: bigint | number;
       }>
@@ -580,7 +579,6 @@ export class OverviewRepository {
           ELSE NULL
         END AS "priceWithVat",
         grouped.sales_with_vat AS "salesWithVat",
-        grouped.purchases_with_vat AS "purchasesWithVat",
         CASE
           WHEN totals.total_market_amount = 0 THEN 0
           ELSE (grouped.sales_with_vat + grouped.purchases_with_vat)
@@ -645,7 +643,6 @@ export class OverviewRepository {
         quantity: Prisma.Decimal | null;
         priceWithVat: Prisma.Decimal | null;
         salesWithVat: Prisma.Decimal | null;
-        purchasesWithVat: Prisma.Decimal | null;
         marketShare: Prisma.Decimal | null;
       }>
     >(Prisma.sql`
@@ -706,7 +703,6 @@ export class OverviewRepository {
           ELSE NULL
         END AS "priceWithVat",
         grouped.sales_with_vat AS "salesWithVat",
-        grouped.purchases_with_vat AS "purchasesWithVat",
         CASE
           WHEN totals.total_market_amount = 0 THEN 0
           ELSE (grouped.sales_with_vat + grouped.purchases_with_vat)
@@ -1507,7 +1503,6 @@ export class OverviewRepository {
     quantity: Prisma.Decimal | null;
     priceWithVat: Prisma.Decimal | null;
     salesWithVat: Prisma.Decimal | null;
-    purchasesWithVat: Prisma.Decimal | null;
     marketShare: Prisma.Decimal | null;
   }): AnalyticsOverviewTableItem {
     return {
@@ -1523,7 +1518,6 @@ export class OverviewRepository {
       quantity: row.quantity === null ? null : Number(row.quantity),
       priceWithVat: row.priceWithVat === null ? null : Number(row.priceWithVat),
       salesWithVat: Number(row.salesWithVat ?? 0),
-      purchasesWithVat: Number(row.purchasesWithVat ?? 0),
       marketShare: Number(row.marketShare ?? 0),
     };
   }
@@ -1581,8 +1575,6 @@ export class OverviewRepository {
         return Prisma.sql`"priceWithVat" ${directionSql} NULLS LAST, grouped.period_start DESC`;
       case 'salesWithVat':
         return Prisma.sql`grouped.sales_with_vat ${directionSql}, grouped.period_start DESC`;
-      case 'purchasesWithVat':
-        return Prisma.sql`grouped.purchases_with_vat ${directionSql}, grouped.period_start DESC`;
       case 'marketShare':
         return Prisma.sql`"marketShare" ${directionSql}, grouped.period_start DESC`;
     }
@@ -1643,27 +1635,23 @@ export class OverviewRepository {
 
   private buildBucketExpressionSql(timeGrain: AnalyticsTimeGrain): Prisma.Sql {
     switch (timeGrain) {
-      case 'DAY':
-        return Prisma.sql`date_trunc('day', record."invoice_date"::date::timestamp)`;
-      case 'WEEK':
-        return Prisma.sql`date_trunc('week', record."invoice_date"::date::timestamp)`;
       case 'MONTH':
         return Prisma.sql`date_trunc('month', record."invoice_date"::date::timestamp)`;
       case 'QUARTER':
         return Prisma.sql`date_trunc('quarter', record."invoice_date"::date::timestamp)`;
+      case 'YEAR':
+        return Prisma.sql`date_trunc('year', record."invoice_date"::date::timestamp)`;
     }
   }
 
   private buildSeriesStepSql(timeGrain: AnalyticsTimeGrain): Prisma.Sql {
     switch (timeGrain) {
-      case 'DAY':
-        return Prisma.sql`'1 day'::interval`;
-      case 'WEEK':
-        return Prisma.sql`'1 week'::interval`;
       case 'MONTH':
         return Prisma.sql`'1 month'::interval`;
       case 'QUARTER':
         return Prisma.sql`'3 months'::interval`;
+      case 'YEAR':
+        return Prisma.sql`'1 year'::interval`;
     }
   }
 
@@ -1672,14 +1660,6 @@ export class OverviewRepository {
     bucketStart.setUTCHours(0, 0, 0, 0);
 
     switch (timeGrain) {
-      case 'DAY':
-        return bucketStart;
-      case 'WEEK': {
-        const day = bucketStart.getUTCDay();
-        const normalizedDay = day === 0 ? 7 : day;
-        bucketStart.setUTCDate(bucketStart.getUTCDate() - (normalizedDay - 1));
-        return bucketStart;
-      }
       case 'MONTH':
         bucketStart.setUTCDate(1);
         return bucketStart;
@@ -1689,6 +1669,9 @@ export class OverviewRepository {
         bucketStart.setUTCMonth(quarterStartMonth, 1);
         return bucketStart;
       }
+      case 'YEAR':
+        bucketStart.setUTCMonth(0, 1);
+        return bucketStart;
     }
   }
 

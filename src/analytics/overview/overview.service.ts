@@ -8,6 +8,7 @@ import {
   ANALYTICS_DEFAULT_TABLE_PAGE,
   ANALYTICS_DEFAULT_TABLE_SORT_DIRECTION,
   ANALYTICS_DEFAULT_TABLE_SORT_FIELD,
+  ANALYTICS_UNKNOWN_REGION_NAME,
 } from './constants/overview.constants';
 import { FilterOptionsQueryDto } from './dto/filter-options-query.dto';
 import { FilterOptionsResponseDto } from './dto/filter-options-response.dto';
@@ -187,7 +188,6 @@ export class OverviewService {
         quantity: item.quantity,
         priceWithVat: item.priceWithVat,
         salesWithVat: item.salesWithVat,
-        purchasesWithVat: item.purchasesWithVat,
         marketShare: item.marketShare,
       })),
       total: result.total,
@@ -309,11 +309,12 @@ export class OverviewService {
             regionCode: this.overviewRepository.resolveRegionCode(
               marketStructure.topBuyerRegion.regionCode,
             ),
-            regionName:
+            regionName: this.formatTopRegionInsightName(
               marketStructure.topBuyerRegion.regionName ??
-              this.overviewRepository.resolveRegionName(
-                marketStructure.topBuyerRegion.regionCode,
-              ),
+                this.overviewRepository.resolveRegionName(
+                  marketStructure.topBuyerRegion.regionCode,
+                ),
+            ),
           }
         : null,
     };
@@ -361,7 +362,13 @@ export class OverviewService {
       'purchasesWithVat',
       'comparisonPurchasesWithVat',
     );
-    const topRegion = input.topRegions[0] ?? null;
+    const topRegion =
+      input.marketStructure.topBuyerRegion ?? input.topRegions[0] ?? null;
+    const topRegionDetails = topRegion
+      ? (input.topRegions.find(
+          (item) => item.regionCode === topRegion.regionCode,
+        ) ?? null)
+      : null;
 
     return [
       {
@@ -402,41 +409,39 @@ export class OverviewService {
         },
       },
       {
-        type: 'BUYER_CONCENTRATION',
-        payload: {
-          top5Share: input.marketStructure.top5BuyersShare,
-          topBuyer: input.marketStructure.topBuyer,
-        },
-      },
-      {
-        type: 'SUPPLIER_CONCENTRATION',
-        payload: {
-          top5Share: input.marketStructure.top5SuppliersShare,
-          topSupplier: input.marketStructure.topSupplier,
-        },
-      },
-      {
         type: 'TOP_REGION',
         payload: {
           regionCode: topRegion?.regionCode ?? null,
-          regionName: topRegion?.regionName ?? null,
+          regionName: this.formatTopRegionInsightName(
+            topRegion?.regionName ?? null,
+          ),
           amount: topRegion?.amount ?? 0,
           share: topRegion?.share ?? 0,
-          activeBuyers: topRegion?.activeBuyers ?? 0,
-          previousAmount: topRegion?.previousAmount ?? null,
-          deltaPercent: topRegion?.deltaPercent ?? null,
-        },
-      },
-      {
-        type: 'TOP_UKTZED',
-        payload: {
-          code: input.marketStructure.topUKTZED?.code ?? null,
-          description: input.marketStructure.topUKTZED?.description ?? null,
-          amount: input.marketStructure.topUKTZED?.amount ?? 0,
-          share: input.marketStructure.topUKTZED?.share ?? 0,
+          activeBuyers: topRegionDetails?.activeBuyers ?? 0,
+          previousAmount: topRegionDetails?.previousAmount ?? null,
+          deltaPercent: topRegionDetails?.deltaPercent ?? null,
         },
       },
     ];
+  }
+
+  private formatTopRegionInsightName(regionName: string | null): string | null {
+    if (!regionName) {
+      return null;
+    }
+
+    if (
+      regionName === 'м. Київ' ||
+      regionName === ANALYTICS_UNKNOWN_REGION_NAME
+    ) {
+      return regionName;
+    }
+
+    if (regionName.endsWith(' обл.')) {
+      return regionName;
+    }
+
+    return `${regionName} обл.`;
   }
 
   private getPeakTrendPoint(
@@ -547,7 +552,6 @@ export class OverviewService {
       Quantity: item.quantity,
       'Price With VAT': item.priceWithVat,
       'Sales With VAT': item.salesWithVat,
-      'Purchases With VAT': item.purchasesWithVat,
       'Market Share': item.marketShare,
     }));
     const fileName = this.buildOverviewExportFileName(query, format);
@@ -739,19 +743,15 @@ export class OverviewService {
 
     const days = this.getInclusiveDayCount(currentRange);
 
-    if (days <= 31) {
-      return 'DAY';
-    }
-
-    if (days <= 120) {
-      return 'WEEK';
-    }
-
     if (days <= 730) {
       return 'MONTH';
     }
 
-    return 'QUARTER';
+    if (days <= 3650) {
+      return 'QUARTER';
+    }
+
+    return 'YEAR';
   }
 
   private buildMetric(
@@ -813,14 +813,12 @@ export class OverviewService {
     const month = value.getUTCMonth() + 1;
 
     switch (timeGrain) {
-      case 'DAY':
-        return this.formatDateOnly(value);
-      case 'WEEK':
-        return `Week of ${this.formatDateOnly(value)}`;
       case 'MONTH':
         return `${year}-${String(month).padStart(2, '0')}`;
       case 'QUARTER':
         return `Q${Math.floor((month - 1) / 3) + 1} ${year}`;
+      case 'YEAR':
+        return String(year);
     }
   }
 
@@ -832,14 +830,12 @@ export class OverviewService {
     const month = value.getUTCMonth() + 1;
 
     switch (timeGrain) {
-      case 'DAY':
-        return this.formatDateOnly(value);
-      case 'WEEK':
-        return this.formatDateOnly(value);
       case 'MONTH':
         return `${year}-${String(month).padStart(2, '0')}`;
       case 'QUARTER':
         return `${year}-Q${Math.floor((month - 1) / 3) + 1}`;
+      case 'YEAR':
+        return String(year);
     }
   }
 
