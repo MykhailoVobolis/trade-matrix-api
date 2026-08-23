@@ -498,7 +498,7 @@ export class SuppliersRepository {
       limit: number;
     },
   ): Promise<{
-    items: Array<{ value: string; label: string | null }>;
+    items: Array<{ value: string; label: string }>;
     total: number;
   }> {
     switch (dimension) {
@@ -559,7 +559,7 @@ export class SuppliersRepository {
     role: 'supplier' | 'buyer',
     includeSupplierFilter: boolean,
   ): Promise<{
-    items: Array<{ value: string; label: string | null }>;
+    items: Array<{ value: string; label: string }>;
     total: number;
   }> {
     const identitySql =
@@ -631,7 +631,7 @@ export class SuppliersRepository {
           row.value
             ? {
                 value: row.value,
-                label: row.label,
+                label: row.label ?? row.value,
               }
             : null,
         ),
@@ -648,7 +648,7 @@ export class SuppliersRepository {
       limit: number;
     },
   ): Promise<{
-    items: Array<{ value: string; label: string | null }>;
+    items: Array<{ value: string; label: string }>;
     total: number;
   }> {
     const whereSql = this.buildBaseScopeSql(scope);
@@ -715,7 +715,7 @@ export class SuppliersRepository {
       limit: number;
     },
   ): Promise<{
-    items: Array<{ value: string; label: string | null }>;
+    items: Array<{ value: string; label: string }>;
     total: number;
   }> {
     const whereSql = this.buildBaseScopeSql(scope);
@@ -782,7 +782,7 @@ export class SuppliersRepository {
       limit: number;
     },
   ): Promise<{
-    items: Array<{ value: string; label: string | null }>;
+    items: Array<{ value: string; label: string }>;
     total: number;
   }> {
     const whereSql = this.buildBaseScopeSql(scope);
@@ -842,7 +842,7 @@ export class SuppliersRepository {
             item,
           ): item is {
             value: string;
-            label: string | null;
+            label: string;
           } => item !== null,
         ),
       total: Number(rows[0]?.totalCount ?? 0),
@@ -1279,14 +1279,14 @@ export class SuppliersRepository {
   }
 
   private compactFilterOptionItems(
-    items: Array<{ value: string; label: string | null } | null>,
-  ): Array<{ value: string; label: string | null }> {
+    items: Array<{ value: string; label: string } | null>,
+  ): Array<{ value: string; label: string }> {
     return items.filter(
       (
         item,
       ): item is {
         value: string;
-        label: string | null;
+        label: string;
       } => item !== null,
     );
   }

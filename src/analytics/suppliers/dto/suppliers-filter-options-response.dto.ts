@@ -1,11 +1,11 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiProperty } from '@nestjs/swagger';
 
 export class SuppliersFilterOptionItemDto {
   @ApiProperty({ example: '42794130' })
   value: string;
 
-  @ApiPropertyOptional({ example: 'БЕСТ ТЕРРА ОЙЛ', nullable: true })
-  label: string | null;
+  @ApiProperty({ example: 'БЕСТ ТЕРРА ОЙЛ' })
+  label: string;
 }
 
 export class SuppliersFilterOptionsResponseDto {
