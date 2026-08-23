@@ -222,31 +222,101 @@ export class SuppliersService {
     query: SuppliersExportQueryDto,
   ): Promise<SuppliersExportFile> {
     const scope = this.suppliersRepository.createBaseScope(user.userId, query);
+    const resolved = this.resolveSuppliersContext(query);
     const format = this.resolveExportFormat(query.format);
     const fileName = `suppliers-report-${query.dateFrom}-${query.dateTo}.${format}`;
+    const sortBy = SUPPLIERS_ANALYTICS_DEFAULT_TABLE_SORT_FIELD;
+    const sortDirection = SUPPLIERS_ANALYTICS_DEFAULT_TABLE_SORT_DIRECTION;
 
     if (!this.suppliersRepository.hasSelectedSuppliers(scope)) {
       return this.buildEmptyExportFile(fileName, format);
     }
 
-    if (format === 'xlsx') {
-      const workbook = utils.book_new();
-      const worksheet = utils.json_to_sheet([]);
-      utils.book_append_sheet(workbook, worksheet, 'Suppliers');
-      const workbookBuffer = write(workbook, {
-        bookType: 'xlsx',
-        type: 'buffer',
-      }) as Buffer<ArrayBufferLike>;
+    return this.suppliersRepository
+      .getSuppliersTableExport(scope, {
+        timeGrain: resolved.timeGrain,
+        sortBy,
+        sortDirection,
+      })
+      .then((items) => {
+        const rows = items.map((item) => ({
+          Period: this.formatTablePeriod(item.periodStart, resolved.timeGrain),
+          'Buyer Region Code': item.buyerRegionCode,
+          'Buyer Region Name': this.suppliersRepository.resolveRegionName(
+            item.buyerRegionCode,
+          ),
+          'Buyer Tax Number': item.buyerTaxNumber,
+          'Buyer Name': item.buyerName,
+          Product: item.product,
+          UKTZED: item.uktzed,
+          Unit: item.unit,
+          Quantity: item.quantity,
+          'Price With VAT': item.priceWithVat,
+          'Sales With VAT': item.salesWithVat,
+          'Market Share': item.marketShare,
+        }));
 
-      return Promise.resolve({
-        buffer: workbookBuffer,
-        fileName,
-        mimeType:
-          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        if (format === 'xlsx') {
+          const workbook = utils.book_new();
+          const worksheet =
+            rows.length > 0
+              ? utils.json_to_sheet(rows)
+              : utils.aoa_to_sheet([
+                  [
+                    'Period',
+                    'Buyer Region Code',
+                    'Buyer Region Name',
+                    'Buyer Tax Number',
+                    'Buyer Name',
+                    'Product',
+                    'UKTZED',
+                    'Unit',
+                    'Quantity',
+                    'Price With VAT',
+                    'Sales With VAT',
+                    'Market Share',
+                  ],
+                ]);
+          utils.book_append_sheet(workbook, worksheet, 'Suppliers');
+          const workbookBuffer = write(workbook, {
+            bookType: 'xlsx',
+            type: 'buffer',
+          }) as Buffer<ArrayBufferLike>;
+
+          return {
+            buffer: workbookBuffer,
+            fileName,
+            mimeType:
+              'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          };
+        }
+
+        const worksheet =
+          rows.length > 0
+            ? utils.json_to_sheet(rows)
+            : utils.aoa_to_sheet([
+                [
+                  'Period',
+                  'Buyer Region Code',
+                  'Buyer Region Name',
+                  'Buyer Tax Number',
+                  'Buyer Name',
+                  'Product',
+                  'UKTZED',
+                  'Unit',
+                  'Quantity',
+                  'Price With VAT',
+                  'Sales With VAT',
+                  'Market Share',
+                ],
+              ]);
+
+        return {
+          buffer: Buffer.from(utils.sheet_to_csv(worksheet), 'utf-8'),
+          fileName,
+          mimeType: 'text/csv; charset=utf-8',
+        };
       });
-    }
-
-    return this.buildEmptyExportFile(fileName, format);
   }
 
   private resolveExportFormat(format?: string) {

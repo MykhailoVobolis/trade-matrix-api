@@ -489,6 +489,105 @@ export class SuppliersRepository {
     };
   }
 
+  async getSuppliersTableExport(
+    scope: SuppliersAnalyticsBaseScope,
+    options: {
+      timeGrain: SuppliersAnalyticsTimeGrain;
+      sortBy: SuppliersAnalyticsTableSortField;
+      sortDirection: 'asc' | 'desc';
+    },
+  ): Promise<SuppliersAnalyticsTableItem[]> {
+    const buyerIdentitySql = this.buildCompanyIdentitySql(
+      'record."buyer_tax_number"',
+      'record."buyer_name"',
+    );
+    const supplierIdentitySql = this.buildCompanyIdentitySql(
+      'record."seller_tax_number"',
+      'record."seller_name"',
+    );
+    const amountWithVatSql = this.amountWithVatSql();
+    const bucketExpressionSql = this.buildBucketExpressionSql(
+      options.timeGrain,
+    );
+    const outputProductSql = this.buildOutputProductSql();
+    const outputUktzedSql = this.buildOutputUktzedSql();
+    const normalizedUnitSql = this.buildNormalizedTextSql('record."unit_name"');
+    const whereSql = this.buildBaseScopeSql(scope);
+    const orderBySql = this.buildSuppliersTableOrderBySql(
+      options.sortBy,
+      options.sortDirection,
+    );
+
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        periodStart: Date;
+        buyerRegionCode: string | null;
+        buyerTaxNumber: string | null;
+        buyerName: string | null;
+        product: string | null;
+        uktzed: string | null;
+        unit: string | null;
+        quantity: Prisma.Decimal | null;
+        priceWithVat: Prisma.Decimal | null;
+        salesWithVat: Prisma.Decimal | null;
+        marketShare: Prisma.Decimal | null;
+      }>
+    >(Prisma.sql`
+      WITH grouped AS (
+        SELECT
+          ${bucketExpressionSql} AS period_start,
+          ${this.buildResolvedRegionGroupSql('record."buyer_region_code"')} AS buyer_region_code,
+          ${buyerIdentitySql} AS buyer_tax_number,
+          MIN(NULLIF(BTRIM(record."buyer_name"), '')) AS buyer_name,
+          NULLIF(${outputProductSql}, '') AS product,
+          NULLIF(${outputUktzedSql}, '') AS uktzed,
+          NULLIF(${normalizedUnitSql}, '') AS unit,
+          SUM(COALESCE(record."quantity", 0)) AS quantity,
+          COALESCE(
+            SUM(
+              CASE
+                WHEN ${supplierIdentitySql} IS NOT NULL THEN ${amountWithVatSql}
+                ELSE 0
+              END
+            ),
+            0
+          ) AS sales_with_vat
+        FROM "RegistryRecord" AS record
+        WHERE ${whereSql}
+          AND ${supplierIdentitySql} IS NOT NULL
+        GROUP BY 1, 2, 3, 5, 6, 7
+      ),
+      totals AS (
+        SELECT COALESCE(SUM(grouped.sales_with_vat), 0) AS total_sales_amount
+        FROM grouped
+      )
+      SELECT
+        grouped.period_start AS "periodStart",
+        grouped.buyer_region_code AS "buyerRegionCode",
+        grouped.buyer_tax_number AS "buyerTaxNumber",
+        grouped.buyer_name AS "buyerName",
+        grouped.product AS product,
+        grouped.uktzed AS uktzed,
+        grouped.unit AS unit,
+        grouped.quantity AS quantity,
+        CASE
+          WHEN COALESCE(grouped.quantity, 0) = 0 THEN NULL
+          WHEN grouped.sales_with_vat <> 0 THEN grouped.sales_with_vat / grouped.quantity
+          ELSE NULL
+        END AS "priceWithVat",
+        grouped.sales_with_vat AS "salesWithVat",
+        CASE
+          WHEN totals.total_sales_amount = 0 THEN 0
+          ELSE grouped.sales_with_vat / totals.total_sales_amount * 100
+        END AS "marketShare"
+      FROM grouped
+      CROSS JOIN totals
+      ORDER BY ${orderBySql}
+    `);
+
+    return rows.map((row) => this.mapSuppliersTableRow(row));
+  }
+
   async getFilterOptions(
     scope: SuppliersAnalyticsBaseScope,
     dimension: SuppliersAnalyticsFilterOptionDimension,
