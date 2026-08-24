@@ -25,7 +25,6 @@ export const ANALYTICS_TABLE_SORT_FIELDS = [
   'quantity',
   'priceWithVat',
   'salesWithVat',
-  'marketShare',
 ] as const;
 
 export const ANALYTICS_SORT_DIRECTIONS = ['asc', 'desc'] as const;

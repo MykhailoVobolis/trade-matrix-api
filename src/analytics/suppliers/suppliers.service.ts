@@ -122,6 +122,7 @@ export class SuppliersService {
             resolved.timeGrain,
           ),
           marketStructure,
+          topProducts: this.buildTopProducts(topProducts, previousTopProducts),
           topRegions: this.buildTopRegions(topRegions, previousTopRegions),
         }),
       }),
@@ -160,6 +161,8 @@ export class SuppliersService {
       .then((result) => ({
         items: result.items.map((item) => ({
           period: this.formatTablePeriod(item.periodStart, resolved.timeGrain),
+          supplierTaxNumber: item.supplierTaxNumber,
+          supplierName: item.supplierName,
           buyerRegionCode: item.buyerRegionCode,
           buyerRegionName: this.suppliersRepository.resolveRegionName(
             item.buyerRegionCode,
@@ -172,7 +175,6 @@ export class SuppliersService {
           quantity: item.quantity,
           priceWithVat: item.priceWithVat,
           salesWithVat: item.salesWithVat,
-          marketShare: item.marketShare,
         })),
         total: result.total,
         page,
@@ -241,6 +243,8 @@ export class SuppliersService {
       .then((items) => {
         const rows = items.map((item) => ({
           Period: this.formatTablePeriod(item.periodStart, resolved.timeGrain),
+          'Supplier Tax Number': item.supplierTaxNumber,
+          Supplier: item.supplierName,
           'Buyer Region Code': item.buyerRegionCode,
           'Buyer Region Name': this.suppliersRepository.resolveRegionName(
             item.buyerRegionCode,
@@ -253,7 +257,6 @@ export class SuppliersService {
           Quantity: item.quantity,
           'Price With VAT': item.priceWithVat,
           'Sales With VAT': item.salesWithVat,
-          'Market Share': item.marketShare,
         }));
 
         if (format === 'xlsx') {
@@ -264,6 +267,8 @@ export class SuppliersService {
               : utils.aoa_to_sheet([
                   [
                     'Period',
+                    'Supplier Tax Number',
+                    'Supplier',
                     'Buyer Region Code',
                     'Buyer Region Name',
                     'Buyer Tax Number',
@@ -274,7 +279,6 @@ export class SuppliersService {
                     'Quantity',
                     'Price With VAT',
                     'Sales With VAT',
-                    'Market Share',
                   ],
                 ]);
           utils.book_append_sheet(workbook, worksheet, 'Suppliers');
@@ -297,6 +301,8 @@ export class SuppliersService {
             : utils.aoa_to_sheet([
                 [
                   'Period',
+                  'Supplier Tax Number',
+                  'Supplier',
                   'Buyer Region Code',
                   'Buyer Region Name',
                   'Buyer Tax Number',
@@ -307,7 +313,6 @@ export class SuppliersService {
                   'Quantity',
                   'Price With VAT',
                   'Sales With VAT',
-                  'Market Share',
                 ],
               ]);
 
@@ -577,6 +582,15 @@ export class SuppliersService {
       } | null;
       top5BuyersShare: number | null;
     };
+    topProducts: Array<{
+      productId: string | null;
+      name: string | null;
+      uktzed: string | null;
+      amount: number;
+      share: number;
+      previousAmount: number | null;
+      deltaPercent: number | null;
+    }>;
     topRegions: Array<{
       regionCode: string | null;
       regionName: string | null;
@@ -615,6 +629,18 @@ export class SuppliersService {
         payload: {
           top5Share: input.marketStructure.top5BuyersShare,
           topBuyer: input.marketStructure.topBuyer,
+        },
+      },
+      {
+        type: 'PRODUCT_CONCENTRATION',
+        payload: {
+          top5Share: this.sumTopShares(input.topProducts),
+        },
+      },
+      {
+        type: 'REGION_CONCENTRATION',
+        payload: {
+          top5Share: this.sumTopShares(input.topRegions),
         },
       },
       {
@@ -659,13 +685,37 @@ export class SuppliersService {
     };
   }
 
+  private sumTopShares(
+    items: Array<{
+      share: number;
+    }>,
+  ): number {
+    return items.reduce((total, item) => total + item.share, 0);
+  }
+
   private buildEmptyExportFile(
     fileName: string,
     format: 'csv' | 'xlsx',
   ): Promise<SuppliersExportFile> {
     if (format === 'xlsx') {
       const workbook = utils.book_new();
-      const worksheet = utils.json_to_sheet([]);
+      const worksheet = utils.aoa_to_sheet([
+        [
+          'Period',
+          'Supplier Tax Number',
+          'Supplier',
+          'Buyer Region Code',
+          'Buyer Region Name',
+          'Buyer Tax Number',
+          'Buyer Name',
+          'Product',
+          'UKTZED',
+          'Unit',
+          'Quantity',
+          'Price With VAT',
+          'Sales With VAT',
+        ],
+      ]);
       utils.book_append_sheet(workbook, worksheet, 'Suppliers');
       const workbookBuffer = write(workbook, {
         bookType: 'xlsx',
@@ -682,7 +732,7 @@ export class SuppliersService {
 
     return Promise.resolve({
       buffer: Buffer.from(
-        'period,buyerRegionCode,buyerRegionName,buyerTaxNumber,buyerName,product,uktzed,unit,quantity,priceWithVat,salesWithVat,marketShare\n',
+        'Period,Supplier Tax Number,Supplier,Buyer Region Code,Buyer Region Name,Buyer Tax Number,Buyer Name,Product,UKTZED,Unit,Quantity,Price With VAT,Sales With VAT\n',
       ),
       fileName,
       mimeType: 'text/csv',

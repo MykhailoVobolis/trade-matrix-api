@@ -4,6 +4,12 @@ export class SuppliersTableItemDto {
   @ApiProperty({ example: '2026-08' })
   period: string;
 
+  @ApiPropertyOptional({ example: '42794130', nullable: true })
+  supplierTaxNumber: string | null;
+
+  @ApiPropertyOptional({ example: 'БЕСТ ТЕРРА ОЙЛ', nullable: true })
+  supplierName: string | null;
+
   @ApiPropertyOptional({ example: '15', nullable: true })
   buyerRegionCode: string | null;
 
@@ -33,9 +39,6 @@ export class SuppliersTableItemDto {
 
   @ApiProperty({ example: 0 })
   salesWithVat: number;
-
-  @ApiProperty({ example: 0 })
-  marketShare: number;
 }
 
 export class SuppliersTableResponseDto {

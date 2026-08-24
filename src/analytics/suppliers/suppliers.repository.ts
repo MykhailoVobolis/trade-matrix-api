@@ -57,20 +57,25 @@ export class SuppliersRepository {
     scope: SuppliersAnalyticsBaseScope,
     options?: {
       includeSupplierFilter?: boolean;
+      includeDateRange?: boolean;
     },
   ): Prisma.RegistryRecordWhereInput {
     const includeSupplierFilter = options?.includeSupplierFilter ?? true;
+    const includeDateRange = options?.includeDateRange ?? true;
     const where: Prisma.RegistryRecordWhereInput = {
       userId: scope.userId,
       isCanonical: true,
       NOT: {
         isExcluded: true,
       },
-      invoiceDate: {
+    };
+
+    if (includeDateRange) {
+      where.invoiceDate = {
         gte: scope.dateRange.from,
         lte: scope.dateRange.to,
-      },
-    };
+      };
+    }
 
     if (includeSupplierFilter && scope.filters.supplierTaxNumbers.length > 0) {
       where.sellerTaxNumber = {
@@ -413,6 +418,8 @@ export class SuppliersRepository {
     const rows = await this.prisma.$queryRaw<
       Array<{
         periodStart: Date;
+        supplierTaxNumber: string | null;
+        supplierName: string | null;
         buyerRegionCode: string | null;
         buyerTaxNumber: string | null;
         buyerName: string | null;
@@ -422,13 +429,14 @@ export class SuppliersRepository {
         quantity: Prisma.Decimal | null;
         priceWithVat: Prisma.Decimal | null;
         salesWithVat: Prisma.Decimal | null;
-        marketShare: Prisma.Decimal | null;
         totalCount: bigint | number;
       }>
     >(Prisma.sql`
       WITH grouped AS (
         SELECT
           ${bucketExpressionSql} AS period_start,
+          ${supplierIdentitySql} AS supplier_tax_number,
+          MIN(NULLIF(BTRIM(record."seller_name"), '')) AS supplier_name,
           ${this.buildResolvedRegionGroupSql('record."buyer_region_code"')} AS buyer_region_code,
           ${buyerIdentitySql} AS buyer_tax_number,
           MIN(NULLIF(BTRIM(record."buyer_name"), '')) AS buyer_name,
@@ -448,16 +456,15 @@ export class SuppliersRepository {
         FROM "RegistryRecord" AS record
         WHERE ${whereSql}
           AND ${supplierIdentitySql} IS NOT NULL
-        GROUP BY 1, 2, 3, 5, 6, 7
+        GROUP BY 1, 2, 4, 5, 7, 8, 9
       ),
       totals AS (
-        SELECT
-          COUNT(*) AS total_count,
-          COALESCE(SUM(grouped.sales_with_vat), 0) AS total_sales_amount
-        FROM grouped
+        SELECT COUNT(*) AS total_count FROM grouped
       )
       SELECT
         grouped.period_start AS "periodStart",
+        grouped.supplier_tax_number AS "supplierTaxNumber",
+        grouped.supplier_name AS "supplierName",
         grouped.buyer_region_code AS "buyerRegionCode",
         grouped.buyer_tax_number AS "buyerTaxNumber",
         grouped.buyer_name AS "buyerName",
@@ -471,10 +478,6 @@ export class SuppliersRepository {
           ELSE NULL
         END AS "priceWithVat",
         grouped.sales_with_vat AS "salesWithVat",
-        CASE
-          WHEN totals.total_sales_amount = 0 THEN 0
-          ELSE grouped.sales_with_vat / totals.total_sales_amount * 100
-        END AS "marketShare",
         totals.total_count AS "totalCount"
       FROM grouped
       CROSS JOIN totals
@@ -521,6 +524,8 @@ export class SuppliersRepository {
     const rows = await this.prisma.$queryRaw<
       Array<{
         periodStart: Date;
+        supplierTaxNumber: string | null;
+        supplierName: string | null;
         buyerRegionCode: string | null;
         buyerTaxNumber: string | null;
         buyerName: string | null;
@@ -530,12 +535,13 @@ export class SuppliersRepository {
         quantity: Prisma.Decimal | null;
         priceWithVat: Prisma.Decimal | null;
         salesWithVat: Prisma.Decimal | null;
-        marketShare: Prisma.Decimal | null;
       }>
     >(Prisma.sql`
       WITH grouped AS (
         SELECT
           ${bucketExpressionSql} AS period_start,
+          ${supplierIdentitySql} AS supplier_tax_number,
+          MIN(NULLIF(BTRIM(record."seller_name"), '')) AS supplier_name,
           ${this.buildResolvedRegionGroupSql('record."buyer_region_code"')} AS buyer_region_code,
           ${buyerIdentitySql} AS buyer_tax_number,
           MIN(NULLIF(BTRIM(record."buyer_name"), '')) AS buyer_name,
@@ -555,14 +561,15 @@ export class SuppliersRepository {
         FROM "RegistryRecord" AS record
         WHERE ${whereSql}
           AND ${supplierIdentitySql} IS NOT NULL
-        GROUP BY 1, 2, 3, 5, 6, 7
+        GROUP BY 1, 2, 4, 5, 7, 8, 9
       ),
       totals AS (
-        SELECT COALESCE(SUM(grouped.sales_with_vat), 0) AS total_sales_amount
-        FROM grouped
+        SELECT 1
       )
       SELECT
         grouped.period_start AS "periodStart",
+        grouped.supplier_tax_number AS "supplierTaxNumber",
+        grouped.supplier_name AS "supplierName",
         grouped.buyer_region_code AS "buyerRegionCode",
         grouped.buyer_tax_number AS "buyerTaxNumber",
         grouped.buyer_name AS "buyerName",
@@ -575,11 +582,7 @@ export class SuppliersRepository {
           WHEN grouped.sales_with_vat <> 0 THEN grouped.sales_with_vat / grouped.quantity
           ELSE NULL
         END AS "priceWithVat",
-        grouped.sales_with_vat AS "salesWithVat",
-        CASE
-          WHEN totals.total_sales_amount = 0 THEN 0
-          ELSE grouped.sales_with_vat / totals.total_sales_amount * 100
-        END AS "marketShare"
+        grouped.sales_with_vat AS "salesWithVat"
       FROM grouped
       CROSS JOIN totals
       ORDER BY ${orderBySql}
@@ -602,9 +605,15 @@ export class SuppliersRepository {
   }> {
     switch (dimension) {
       case 'suppliers':
-        return this.getEntityFilterOptions(scope, options, 'supplier', false);
+        return this.getEntityFilterOptions(
+          scope,
+          options,
+          'supplier',
+          false,
+          false,
+        );
       case 'buyers':
-        return this.getEntityFilterOptions(scope, options, 'buyer', true);
+        return this.getEntityFilterOptions(scope, options, 'buyer', true, true);
       case 'products':
         return this.getProductFilterOptions(scope, options);
       case 'uktzed':
@@ -657,6 +666,7 @@ export class SuppliersRepository {
     },
     role: 'supplier' | 'buyer',
     includeSupplierFilter: boolean,
+    includeDateRange: boolean,
   ): Promise<{
     items: Array<{ value: string; label: string }>;
     total: number;
@@ -674,7 +684,10 @@ export class SuppliersRepository {
     const nameColumn =
       role === 'supplier' ? 'record."seller_name"' : 'record."buyer_name"';
     const search = this.normalizeText(options.search)?.toLowerCase() ?? null;
-    const whereSql = this.buildBaseScopeSql(scope, { includeSupplierFilter });
+    const whereSql = this.buildBaseScopeSql(scope, {
+      includeSupplierFilter,
+      includeDateRange,
+    });
     const offset = (options.page - 1) * options.limit;
 
     const rows = await this.prisma.$queryRaw<
@@ -1215,6 +1228,8 @@ export class SuppliersRepository {
 
   private mapSuppliersTableRow(row: {
     periodStart: Date;
+    supplierTaxNumber: string | null;
+    supplierName: string | null;
     buyerRegionCode: string | null;
     buyerTaxNumber: string | null;
     buyerName: string | null;
@@ -1224,10 +1239,11 @@ export class SuppliersRepository {
     quantity: Prisma.Decimal | null;
     priceWithVat: Prisma.Decimal | null;
     salesWithVat: Prisma.Decimal | null;
-    marketShare: Prisma.Decimal | null;
   }): SuppliersAnalyticsTableItem {
     return {
       periodStart: row.periodStart,
+      supplierTaxNumber: row.supplierTaxNumber,
+      supplierName: row.supplierName,
       buyerRegionCode: this.resolveRegionCode(row.buyerRegionCode),
       buyerTaxNumber: row.buyerTaxNumber,
       buyerName: row.buyerName,
@@ -1237,7 +1253,6 @@ export class SuppliersRepository {
       quantity: row.quantity === null ? null : Number(row.quantity),
       priceWithVat: row.priceWithVat === null ? null : Number(row.priceWithVat),
       salesWithVat: Number(row.salesWithVat ?? 0),
-      marketShare: Number(row.marketShare ?? 0),
     };
   }
 
@@ -1267,8 +1282,6 @@ export class SuppliersRepository {
         return Prisma.sql`"priceWithVat" ${directionSql} NULLS LAST, grouped.period_start DESC`;
       case 'salesWithVat':
         return Prisma.sql`grouped.sales_with_vat ${directionSql}, grouped.period_start DESC`;
-      case 'marketShare':
-        return Prisma.sql`"marketShare" ${directionSql}, grouped.period_start DESC`;
     }
   }
 
@@ -1276,16 +1289,23 @@ export class SuppliersRepository {
     scope: SuppliersAnalyticsBaseScope,
     options?: {
       includeSupplierFilter?: boolean;
+      includeDateRange?: boolean;
     },
   ): Prisma.Sql {
     const includeSupplierFilter = options?.includeSupplierFilter ?? true;
+    const includeDateRange = options?.includeDateRange ?? true;
     const conditions: Prisma.Sql[] = [
       Prisma.sql`record."userId" = ${scope.userId}`,
       Prisma.sql`record."is_canonical" = TRUE`,
       Prisma.sql`COALESCE(record."is_excluded", FALSE) = FALSE`,
-      Prisma.sql`record."invoice_date" >= ${scope.dateRange.from}`,
-      Prisma.sql`record."invoice_date" <= ${scope.dateRange.to}`,
     ];
+
+    if (includeDateRange) {
+      conditions.push(
+        Prisma.sql`record."invoice_date" >= ${scope.dateRange.from}`,
+        Prisma.sql`record."invoice_date" <= ${scope.dateRange.to}`,
+      );
+    }
 
     if (includeSupplierFilter && scope.filters.supplierTaxNumbers.length > 0) {
       conditions.push(

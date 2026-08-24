@@ -110,6 +110,8 @@ export type SuppliersAnalyticsTopRegion = {
 
 export type SuppliersAnalyticsTableItem = {
   periodStart: Date;
+  supplierTaxNumber: string | null;
+  supplierName: string | null;
   buyerRegionCode: string | null;
   buyerTaxNumber: string | null;
   buyerName: string | null;
@@ -119,7 +121,6 @@ export type SuppliersAnalyticsTableItem = {
   quantity: number | null;
   priceWithVat: number | null;
   salesWithVat: number;
-  marketShare: number;
 };
 
 export type SuppliersAnalyticsTableResult = {

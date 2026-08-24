@@ -188,7 +188,6 @@ export class OverviewService {
         quantity: item.quantity,
         priceWithVat: item.priceWithVat,
         salesWithVat: item.salesWithVat,
-        marketShare: item.marketShare,
       })),
       total: result.total,
       page,
@@ -552,7 +551,6 @@ export class OverviewService {
       Quantity: item.quantity,
       'Price With VAT': item.priceWithVat,
       'Sales With VAT': item.salesWithVat,
-      'Market Share': item.marketShare,
     }));
     const fileName = this.buildOverviewExportFileName(query, format);
 

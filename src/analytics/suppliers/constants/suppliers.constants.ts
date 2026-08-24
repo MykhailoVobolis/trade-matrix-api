@@ -28,7 +28,6 @@ export const SUPPLIERS_ANALYTICS_TABLE_SORT_FIELDS = [
   'quantity',
   'priceWithVat',
   'salesWithVat',
-  'marketShare',
 ] as const;
 
 export const SUPPLIERS_ANALYTICS_SORT_DIRECTIONS = ['asc', 'desc'] as const;

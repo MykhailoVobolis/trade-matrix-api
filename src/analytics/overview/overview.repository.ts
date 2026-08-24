@@ -517,7 +517,6 @@ export class OverviewRepository {
         quantity: Prisma.Decimal | null;
         priceWithVat: Prisma.Decimal | null;
         salesWithVat: Prisma.Decimal | null;
-        marketShare: Prisma.Decimal | null;
         totalCount: bigint | number;
       }>
     >(Prisma.sql`
@@ -556,10 +555,7 @@ export class OverviewRepository {
         GROUP BY 1, 2, 3, 5, 7, 8, 9
       ),
       totals AS (
-        SELECT
-          COUNT(*) AS total_count,
-          COALESCE(SUM(grouped.sales_with_vat + grouped.purchases_with_vat), 0) AS total_market_amount
-        FROM grouped
+        SELECT COUNT(*) AS total_count FROM grouped
       )
       SELECT
         grouped.period_start AS "periodStart",
@@ -579,11 +575,6 @@ export class OverviewRepository {
           ELSE NULL
         END AS "priceWithVat",
         grouped.sales_with_vat AS "salesWithVat",
-        CASE
-          WHEN totals.total_market_amount = 0 THEN 0
-          ELSE (grouped.sales_with_vat + grouped.purchases_with_vat)
-            / totals.total_market_amount * 100
-        END AS "marketShare",
         totals.total_count AS "totalCount"
       FROM grouped
       CROSS JOIN totals
@@ -643,7 +634,6 @@ export class OverviewRepository {
         quantity: Prisma.Decimal | null;
         priceWithVat: Prisma.Decimal | null;
         salesWithVat: Prisma.Decimal | null;
-        marketShare: Prisma.Decimal | null;
       }>
     >(Prisma.sql`
       WITH grouped AS (
@@ -681,9 +671,7 @@ export class OverviewRepository {
         GROUP BY 1, 2, 3, 5, 7, 8, 9
       ),
       totals AS (
-        SELECT
-          COALESCE(SUM(grouped.sales_with_vat + grouped.purchases_with_vat), 0) AS total_market_amount
-        FROM grouped
+        SELECT 1
       )
       SELECT
         grouped.period_start AS "periodStart",
@@ -702,12 +690,7 @@ export class OverviewRepository {
           WHEN grouped.purchases_with_vat <> 0 THEN grouped.purchases_with_vat / grouped.quantity
           ELSE NULL
         END AS "priceWithVat",
-        grouped.sales_with_vat AS "salesWithVat",
-        CASE
-          WHEN totals.total_market_amount = 0 THEN 0
-          ELSE (grouped.sales_with_vat + grouped.purchases_with_vat)
-            / totals.total_market_amount * 100
-        END AS "marketShare"
+        grouped.sales_with_vat AS "salesWithVat"
       FROM grouped
       CROSS JOIN totals
       ORDER BY ${orderBySql}
@@ -1503,7 +1486,6 @@ export class OverviewRepository {
     quantity: Prisma.Decimal | null;
     priceWithVat: Prisma.Decimal | null;
     salesWithVat: Prisma.Decimal | null;
-    marketShare: Prisma.Decimal | null;
   }): AnalyticsOverviewTableItem {
     return {
       periodStart: row.periodStart,
@@ -1518,7 +1500,6 @@ export class OverviewRepository {
       quantity: row.quantity === null ? null : Number(row.quantity),
       priceWithVat: row.priceWithVat === null ? null : Number(row.priceWithVat),
       salesWithVat: Number(row.salesWithVat ?? 0),
-      marketShare: Number(row.marketShare ?? 0),
     };
   }
 
@@ -1575,8 +1556,6 @@ export class OverviewRepository {
         return Prisma.sql`"priceWithVat" ${directionSql} NULLS LAST, grouped.period_start DESC`;
       case 'salesWithVat':
         return Prisma.sql`grouped.sales_with_vat ${directionSql}, grouped.period_start DESC`;
-      case 'marketShare':
-        return Prisma.sql`"marketShare" ${directionSql}, grouped.period_start DESC`;
     }
   }
 
