@@ -2,6 +2,8 @@ import {
   ANALYTICS_COMPARISON_MODES,
   ANALYTICS_EXPORT_FORMATS,
   ANALYTICS_FILTER_OPTION_DIMENSIONS,
+  ANALYTICS_RANKING_DIMENSIONS,
+  ANALYTICS_RANKING_SORT_FIELDS,
   ANALYTICS_SORT_DIRECTIONS,
   ANALYTICS_TABLE_SORT_FIELDS,
   ANALYTICS_TIME_GRAINS,
@@ -15,8 +17,14 @@ export type AnalyticsTimeGrain = (typeof ANALYTICS_TIME_GRAINS)[number];
 export type AnalyticsFilterOptionDimension =
   (typeof ANALYTICS_FILTER_OPTION_DIMENSIONS)[number];
 
+export type AnalyticsRankingDimension =
+  (typeof ANALYTICS_RANKING_DIMENSIONS)[number];
+
 export type AnalyticsTableSortField =
   (typeof ANALYTICS_TABLE_SORT_FIELDS)[number];
+
+export type AnalyticsRankingSortField =
+  (typeof ANALYTICS_RANKING_SORT_FIELDS)[number];
 
 export type AnalyticsSortDirection = (typeof ANALYTICS_SORT_DIRECTIONS)[number];
 export type AnalyticsExportFormat = (typeof ANALYTICS_EXPORT_FORMATS)[number];
@@ -131,5 +139,10 @@ export type AnalyticsOverviewTableItem = {
 
 export type AnalyticsOverviewTableResult = {
   items: AnalyticsOverviewTableItem[];
+  total: number;
+};
+
+export type AnalyticsRankingResult<TItem> = {
+  items: TItem[];
   total: number;
 };

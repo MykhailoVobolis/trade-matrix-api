@@ -4,6 +4,8 @@ import type { AuthenticatedUser } from '../../auth/types/authenticated-user.type
 import {
   SUPPLIERS_ANALYTICS_DEFAULT_FILTER_OPTIONS_LIMIT,
   SUPPLIERS_ANALYTICS_DEFAULT_FILTER_OPTIONS_PAGE,
+  SUPPLIERS_ANALYTICS_DEFAULT_RANKINGS_LIMIT,
+  SUPPLIERS_ANALYTICS_DEFAULT_RANKINGS_PAGE,
   SUPPLIERS_ANALYTICS_DEFAULT_TABLE_LIMIT,
   SUPPLIERS_ANALYTICS_DEFAULT_TABLE_PAGE,
   SUPPLIERS_ANALYTICS_DEFAULT_TABLE_SORT_DIRECTION,
@@ -14,6 +16,8 @@ import { SuppliersExportQueryDto } from './dto/suppliers-export-query.dto';
 import { SuppliersFilterOptionsQueryDto } from './dto/suppliers-filter-options-query.dto';
 import { SuppliersFilterOptionsResponseDto } from './dto/suppliers-filter-options-response.dto';
 import { SuppliersQueryDto } from './dto/suppliers-query.dto';
+import { SuppliersRankingsQueryDto } from './dto/suppliers-rankings-query.dto';
+import { SuppliersRankingsResponseDto } from './dto/suppliers-rankings-response.dto';
 import { SuppliersResponseDto } from './dto/suppliers-response.dto';
 import { SuppliersTableQueryDto } from './dto/suppliers-table-query.dto';
 import { SuppliersTableResponseDto } from './dto/suppliers-table-response.dto';
@@ -180,6 +184,108 @@ export class SuppliersService {
         page,
         limit,
       }));
+  }
+
+  async getSuppliersRankings(
+    user: AuthenticatedUser,
+    query: SuppliersRankingsQueryDto,
+  ): Promise<SuppliersRankingsResponseDto> {
+    const scope = this.suppliersRepository.createBaseScope(user.userId, query);
+    const resolved = this.resolveSuppliersContext(query);
+    const comparisonScope = resolved.comparisonRange
+      ? {
+          ...scope,
+          dateRange: resolved.comparisonRange,
+        }
+      : null;
+    const page = query.page ?? SUPPLIERS_ANALYTICS_DEFAULT_RANKINGS_PAGE;
+    const limit = query.limit ?? SUPPLIERS_ANALYTICS_DEFAULT_RANKINGS_LIMIT;
+
+    if (!this.suppliersRepository.hasSelectedSuppliers(scope)) {
+      return {
+        items: [],
+        total: 0,
+        page,
+        limit,
+      };
+    }
+
+    switch (query.dimension) {
+      case 'buyers': {
+        const current = await this.suppliersRepository.getBuyerRankings(scope, {
+          page,
+          limit,
+        });
+        const previous = comparisonScope
+          ? await this.suppliersRepository.getBuyerRankingComparisonAmounts(
+              comparisonScope,
+              current.items.map((item) => item.id).filter(Boolean) as string[],
+            )
+          : [];
+
+        return {
+          items: this.buildTopEntities(current.items, previous),
+          total: current.total,
+          page,
+          limit,
+        };
+      }
+      case 'products': {
+        const current = await this.suppliersRepository.getProductRankings(
+          scope,
+          {
+            page,
+            limit,
+          },
+        );
+        const previous = comparisonScope
+          ? await this.suppliersRepository.getProductRankingComparisonAmounts(
+              comparisonScope,
+              current.items.flatMap((item) =>
+                item.name === null
+                  ? []
+                  : [
+                      {
+                        name: item.name,
+                        uktzed: item.uktzed,
+                      },
+                    ],
+              ),
+            )
+          : [];
+
+        return {
+          items: this.buildTopProducts(current.items, previous),
+          total: current.total,
+          page,
+          limit,
+        };
+      }
+      case 'regions': {
+        const current = await this.suppliersRepository.getRegionRankings(
+          scope,
+          {
+            page,
+            limit,
+          },
+        );
+        const previous = comparisonScope
+          ? await this.suppliersRepository.getRegionRankingComparisonAmounts(
+              comparisonScope,
+              current.items
+                .map((item) => item.regionCode)
+                .filter(Boolean) as string[],
+            )
+          : [];
+
+        return {
+          items: this.buildTopRegions(current.items, previous),
+          total: current.total,
+          page,
+          limit,
+        };
+      }
+    }
   }
 
   getFilterOptions(

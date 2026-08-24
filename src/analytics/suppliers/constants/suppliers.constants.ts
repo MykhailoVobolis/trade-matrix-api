@@ -18,6 +18,21 @@ export const SUPPLIERS_ANALYTICS_FILTER_OPTION_DIMENSIONS = [
   'buyerRegions',
 ] as const;
 
+export const SUPPLIERS_ANALYTICS_RANKING_DIMENSIONS = [
+  'buyers',
+  'products',
+  'regions',
+] as const;
+
+export const SUPPLIERS_ANALYTICS_RANKING_SORT_FIELDS = [
+  'name',
+  'amount',
+  'share',
+  'uktzed',
+  'regionName',
+  'activeBuyers',
+] as const;
+
 export const SUPPLIERS_ANALYTICS_TABLE_SORT_FIELDS = [
   'period',
   'buyerRegion',
@@ -38,5 +53,11 @@ export const SUPPLIERS_ANALYTICS_DEFAULT_TABLE_PAGE = 1;
 export const SUPPLIERS_ANALYTICS_DEFAULT_TABLE_LIMIT = 5;
 export const SUPPLIERS_ANALYTICS_DEFAULT_TABLE_SORT_FIELD = 'period' as const;
 export const SUPPLIERS_ANALYTICS_DEFAULT_TABLE_SORT_DIRECTION = 'desc' as const;
+export const SUPPLIERS_ANALYTICS_DEFAULT_RANKINGS_PAGE = 1;
+export const SUPPLIERS_ANALYTICS_DEFAULT_RANKINGS_LIMIT = 10;
+export const SUPPLIERS_ANALYTICS_DEFAULT_RANKINGS_SORT_FIELD =
+  'amount' as const;
+export const SUPPLIERS_ANALYTICS_DEFAULT_RANKINGS_SORT_DIRECTION =
+  'desc' as const;
 export const SUPPLIERS_ANALYTICS_DEFAULT_FILTER_OPTIONS_PAGE = 1;
 export const SUPPLIERS_ANALYTICS_DEFAULT_FILTER_OPTIONS_LIMIT = 10;

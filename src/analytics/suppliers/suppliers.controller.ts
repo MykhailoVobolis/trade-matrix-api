@@ -22,6 +22,8 @@ import { SuppliersExportQueryDto } from './dto/suppliers-export-query.dto';
 import { SuppliersFilterOptionsQueryDto } from './dto/suppliers-filter-options-query.dto';
 import { SuppliersFilterOptionsResponseDto } from './dto/suppliers-filter-options-response.dto';
 import { SuppliersQueryDto } from './dto/suppliers-query.dto';
+import { SuppliersRankingsQueryDto } from './dto/suppliers-rankings-query.dto';
+import { SuppliersRankingsResponseDto } from './dto/suppliers-rankings-response.dto';
 import { SuppliersResponseDto } from './dto/suppliers-response.dto';
 import { SuppliersTableQueryDto } from './dto/suppliers-table-query.dto';
 import { SuppliersTableResponseDto } from './dto/suppliers-table-response.dto';
@@ -62,6 +64,19 @@ export class SuppliersController {
     @Query() query: SuppliersTableQueryDto,
   ): Promise<SuppliersTableResponseDto> {
     return this.suppliersService.getSuppliersTable(user, query);
+  }
+
+  @Get('suppliers/rankings')
+  @ApiOperation({
+    summary: 'Get paginated supplier rankings for the selected dimension',
+  })
+  @ApiOkResponse({ type: SuppliersRankingsResponseDto })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid access token' })
+  getSuppliersRankings(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: SuppliersRankingsQueryDto,
+  ): Promise<SuppliersRankingsResponseDto> {
+    return this.suppliersService.getSuppliersRankings(user, query);
   }
 
   @Get('suppliers/filter-options')

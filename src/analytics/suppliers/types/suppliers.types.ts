@@ -2,6 +2,8 @@ import {
   SUPPLIERS_ANALYTICS_COMPARISON_MODES,
   SUPPLIERS_ANALYTICS_EXPORT_FORMATS,
   SUPPLIERS_ANALYTICS_FILTER_OPTION_DIMENSIONS,
+  SUPPLIERS_ANALYTICS_RANKING_DIMENSIONS,
+  SUPPLIERS_ANALYTICS_RANKING_SORT_FIELDS,
   SUPPLIERS_ANALYTICS_SORT_DIRECTIONS,
   SUPPLIERS_ANALYTICS_TABLE_SORT_FIELDS,
   SUPPLIERS_ANALYTICS_TIME_GRAINS,
@@ -16,8 +18,14 @@ export type SuppliersAnalyticsTimeGrain =
 export type SuppliersAnalyticsFilterOptionDimension =
   (typeof SUPPLIERS_ANALYTICS_FILTER_OPTION_DIMENSIONS)[number];
 
+export type SuppliersAnalyticsRankingDimension =
+  (typeof SUPPLIERS_ANALYTICS_RANKING_DIMENSIONS)[number];
+
 export type SuppliersAnalyticsTableSortField =
   (typeof SUPPLIERS_ANALYTICS_TABLE_SORT_FIELDS)[number];
+
+export type SuppliersAnalyticsRankingSortField =
+  (typeof SUPPLIERS_ANALYTICS_RANKING_SORT_FIELDS)[number];
 
 export type SuppliersAnalyticsSortDirection =
   (typeof SUPPLIERS_ANALYTICS_SORT_DIRECTIONS)[number];
@@ -125,5 +133,10 @@ export type SuppliersAnalyticsTableItem = {
 
 export type SuppliersAnalyticsTableResult = {
   items: SuppliersAnalyticsTableItem[];
+  total: number;
+};
+
+export type SuppliersAnalyticsRankingResult<TItem> = {
+  items: TItem[];
   total: number;
 };

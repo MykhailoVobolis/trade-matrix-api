@@ -4,6 +4,8 @@ import type { AuthenticatedUser } from '../../auth/types/authenticated-user.type
 import {
   ANALYTICS_DEFAULT_FILTER_OPTIONS_LIMIT,
   ANALYTICS_DEFAULT_FILTER_OPTIONS_PAGE,
+  ANALYTICS_DEFAULT_RANKINGS_LIMIT,
+  ANALYTICS_DEFAULT_RANKINGS_PAGE,
   ANALYTICS_DEFAULT_TABLE_LIMIT,
   ANALYTICS_DEFAULT_TABLE_PAGE,
   ANALYTICS_DEFAULT_TABLE_SORT_DIRECTION,
@@ -14,6 +16,8 @@ import { FilterOptionsQueryDto } from './dto/filter-options-query.dto';
 import { FilterOptionsResponseDto } from './dto/filter-options-response.dto';
 import { OverviewExportQueryDto } from './dto/overview-export-query.dto';
 import { OverviewQueryDto } from './dto/overview-query.dto';
+import { OverviewRankingsQueryDto } from './dto/overview-rankings-query.dto';
+import { OverviewRankingsResponseDto } from './dto/overview-rankings-response.dto';
 import {
   OverviewComparisonDto,
   OverviewMetricDto,
@@ -193,6 +197,118 @@ export class OverviewService {
       page,
       limit,
     };
+  }
+
+  async getOverviewRankings(
+    user: AuthenticatedUser,
+    query: OverviewRankingsQueryDto,
+  ): Promise<OverviewRankingsResponseDto> {
+    const resolved = this.resolveOverviewContext(query);
+    const scope = this.overviewRepository.createBaseScope(user.userId, query);
+    const comparisonScope = resolved.comparisonRange
+      ? {
+          ...scope,
+          dateRange: resolved.comparisonRange,
+        }
+      : null;
+    const page = query.page ?? ANALYTICS_DEFAULT_RANKINGS_PAGE;
+    const limit = query.limit ?? ANALYTICS_DEFAULT_RANKINGS_LIMIT;
+
+    switch (query.dimension) {
+      case 'buyers': {
+        const current = await this.overviewRepository.getBuyerRankings(scope, {
+          page,
+          limit,
+        });
+        const previous = comparisonScope
+          ? await this.overviewRepository.getBuyerRankingComparisonAmounts(
+              comparisonScope,
+              current.items.map((item) => item.id).filter(Boolean) as string[],
+            )
+          : [];
+
+        return {
+          items: this.buildTopEntities(current.items, previous),
+          total: current.total,
+          page,
+          limit,
+        };
+      }
+      case 'suppliers': {
+        const current = await this.overviewRepository.getSupplierRankings(
+          scope,
+          {
+            page,
+            limit,
+          },
+        );
+        const previous = comparisonScope
+          ? await this.overviewRepository.getSupplierRankingComparisonAmounts(
+              comparisonScope,
+              current.items.map((item) => item.id).filter(Boolean) as string[],
+            )
+          : [];
+
+        return {
+          items: this.buildTopEntities(current.items, previous),
+          total: current.total,
+          page,
+          limit,
+        };
+      }
+      case 'products': {
+        const current = await this.overviewRepository.getProductRankings(
+          scope,
+          {
+            page,
+            limit,
+          },
+        );
+        const previous = comparisonScope
+          ? await this.overviewRepository.getProductRankingComparisonAmounts(
+              comparisonScope,
+              current.items.flatMap((item) =>
+                item.name === null
+                  ? []
+                  : [
+                      {
+                        name: item.name,
+                        uktzed: item.uktzed,
+                      },
+                    ],
+              ),
+            )
+          : [];
+
+        return {
+          items: this.buildTopProducts(current.items, previous),
+          total: current.total,
+          page,
+          limit,
+        };
+      }
+      case 'regions': {
+        const current = await this.overviewRepository.getRegionRankings(scope, {
+          page,
+          limit,
+        });
+        const previous = comparisonScope
+          ? await this.overviewRepository.getRegionRankingComparisonAmounts(
+              comparisonScope,
+              current.items
+                .map((item) => item.regionCode)
+                .filter(Boolean) as string[],
+            )
+          : [];
+
+        return {
+          items: this.buildTopRegions(current.items, previous),
+          total: current.total,
+          page,
+          limit,
+        };
+      }
+    }
   }
 
   private buildTrend(

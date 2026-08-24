@@ -22,6 +22,8 @@ import { FilterOptionsQueryDto } from './dto/filter-options-query.dto';
 import { FilterOptionsResponseDto } from './dto/filter-options-response.dto';
 import { OverviewExportQueryDto } from './dto/overview-export-query.dto';
 import { OverviewQueryDto } from './dto/overview-query.dto';
+import { OverviewRankingsQueryDto } from './dto/overview-rankings-query.dto';
+import { OverviewRankingsResponseDto } from './dto/overview-rankings-response.dto';
 import { OverviewResponseDto } from './dto/overview-response.dto';
 import { OverviewTableQueryDto } from './dto/overview-table-query.dto';
 import { OverviewTableResponseDto } from './dto/overview-table-response.dto';
@@ -54,6 +56,19 @@ export class OverviewController {
     @Query() query: OverviewTableQueryDto,
   ): Promise<OverviewTableResponseDto> {
     return this.overviewService.getOverviewTable(user, query);
+  }
+
+  @Get('overview/rankings')
+  @ApiOperation({
+    summary: 'Get paginated overview rankings for the selected dimension',
+  })
+  @ApiOkResponse({ type: OverviewRankingsResponseDto })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid access token' })
+  getOverviewRankings(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: OverviewRankingsQueryDto,
+  ): Promise<OverviewRankingsResponseDto> {
+    return this.overviewService.getOverviewRankings(user, query);
   }
 
   @Get('filter-options')
