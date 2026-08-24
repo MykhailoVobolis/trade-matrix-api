@@ -765,7 +765,7 @@ export class BuyersRepository {
           options,
           'buyer',
           false,
-          true,
+          false,
         );
       case 'suppliers':
         return this.getEntityFilterOptions(

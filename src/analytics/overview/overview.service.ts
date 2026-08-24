@@ -135,8 +135,8 @@ export class OverviewService {
         return {
           period: this.toPeriod(resolved),
           comparison: this.toComparison(resolved),
-          kpi,
-          trend,
+          kpi: this.toOverviewKpi(kpi),
+          trend: this.toOverviewTrend(trend),
           marketStructure: normalizedMarketStructure,
           topBuyers: this.buildTopEntities(topBuyers, previousTopBuyers),
           topSuppliers: this.buildTopEntities(
@@ -328,6 +328,33 @@ export class OverviewService {
         comparisonPurchasesWithVat: comparisonPoint?.purchasesWithVat ?? null,
       };
     });
+  }
+
+  private toOverviewKpi(kpi: Record<string, OverviewMetricDto>) {
+    return {
+      salesWithVat: kpi.salesWithVat,
+      activeBuyers: kpi.activeBuyers,
+      activeSuppliers: kpi.activeSuppliers,
+      salesRegions: kpi.salesRegions,
+    };
+  }
+
+  private toOverviewTrend(
+    trend: Array<{
+      periodStart: string;
+      periodLabel: string;
+      salesWithVat: number;
+      purchasesWithVat: number;
+      comparisonSalesWithVat: number | null;
+      comparisonPurchasesWithVat: number | null;
+    }>,
+  ) {
+    return trend.map((point) => ({
+      periodStart: point.periodStart,
+      periodLabel: point.periodLabel,
+      salesWithVat: point.salesWithVat,
+      comparisonSalesWithVat: point.comparisonSalesWithVat,
+    }));
   }
 
   private buildTopEntities(

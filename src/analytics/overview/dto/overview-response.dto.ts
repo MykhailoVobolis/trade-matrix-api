@@ -46,14 +46,8 @@ export class OverviewTrendPointDto {
   @ApiProperty({ example: 0 })
   salesWithVat: number;
 
-  @ApiProperty({ example: 0 })
-  purchasesWithVat: number;
-
   @ApiPropertyOptional({ example: 0, nullable: true })
   comparisonSalesWithVat: number | null;
-
-  @ApiPropertyOptional({ example: 0, nullable: true })
-  comparisonPurchasesWithVat: number | null;
 }
 
 export class OverviewRankingItemDto {
