@@ -39,9 +39,6 @@ export class OverviewTableItemDto {
 
   @ApiProperty({ example: 0 })
   salesWithVat: number;
-
-  @ApiProperty({ example: 0 })
-  marketShare: number;
 }
 
 export class OverviewTableResponseDto {

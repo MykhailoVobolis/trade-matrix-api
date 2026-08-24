@@ -1,0 +1,1054 @@
+import { BadRequestException, Injectable } from '@nestjs/common';
+import { utils, write } from 'xlsx';
+import type { AuthenticatedUser } from '../../auth/types/authenticated-user.type';
+import {
+  SUPPLIERS_ANALYTICS_DEFAULT_FILTER_OPTIONS_LIMIT,
+  SUPPLIERS_ANALYTICS_DEFAULT_FILTER_OPTIONS_PAGE,
+  SUPPLIERS_ANALYTICS_DEFAULT_RANKINGS_LIMIT,
+  SUPPLIERS_ANALYTICS_DEFAULT_RANKINGS_PAGE,
+  SUPPLIERS_ANALYTICS_DEFAULT_TABLE_LIMIT,
+  SUPPLIERS_ANALYTICS_DEFAULT_TABLE_PAGE,
+  SUPPLIERS_ANALYTICS_DEFAULT_TABLE_SORT_DIRECTION,
+  SUPPLIERS_ANALYTICS_DEFAULT_TABLE_SORT_FIELD,
+  SUPPLIERS_ANALYTICS_EXPORT_FORMATS,
+} from './constants/suppliers.constants';
+import { SuppliersExportQueryDto } from './dto/suppliers-export-query.dto';
+import { SuppliersFilterOptionsQueryDto } from './dto/suppliers-filter-options-query.dto';
+import { SuppliersFilterOptionsResponseDto } from './dto/suppliers-filter-options-response.dto';
+import { SuppliersQueryDto } from './dto/suppliers-query.dto';
+import { SuppliersRankingsQueryDto } from './dto/suppliers-rankings-query.dto';
+import { SuppliersRankingsResponseDto } from './dto/suppliers-rankings-response.dto';
+import { SuppliersResponseDto } from './dto/suppliers-response.dto';
+import { SuppliersTableQueryDto } from './dto/suppliers-table-query.dto';
+import { SuppliersTableResponseDto } from './dto/suppliers-table-response.dto';
+import { SuppliersRepository } from './suppliers.repository';
+import type {
+  SuppliersAnalyticsComparisonMode,
+  SuppliersAnalyticsTimeGrain,
+} from './types/suppliers.types';
+
+type SuppliersExportFile = {
+  buffer: Buffer;
+  fileName: string;
+  mimeType: string;
+};
+
+type ResolvedDateRange = {
+  from: Date;
+  to: Date;
+};
+
+type ResolvedSuppliersContext = {
+  currentRange: ResolvedDateRange;
+  comparisonMode: SuppliersAnalyticsComparisonMode;
+  comparisonRange: ResolvedDateRange | null;
+  timeGrain: SuppliersAnalyticsTimeGrain;
+};
+
+@Injectable()
+export class SuppliersService {
+  constructor(private readonly suppliersRepository: SuppliersRepository) {}
+
+  getSuppliers(
+    user: AuthenticatedUser,
+    query: SuppliersQueryDto,
+  ): Promise<SuppliersResponseDto> {
+    const scope = this.suppliersRepository.createBaseScope(user.userId, query);
+    const resolved = this.resolveSuppliersContext(query);
+
+    if (!this.suppliersRepository.hasSelectedSuppliers(scope)) {
+      return Promise.resolve(this.buildEmptyDashboardResponse(query, resolved));
+    }
+
+    const comparisonScope = resolved.comparisonRange
+      ? {
+          ...scope,
+          dateRange: resolved.comparisonRange,
+        }
+      : null;
+
+    return Promise.all([
+      this.suppliersRepository.getKpiTotals(scope),
+      comparisonScope
+        ? this.suppliersRepository.getKpiTotals(comparisonScope)
+        : Promise.resolve(null),
+      this.suppliersRepository.getTrendPoints(scope, resolved.timeGrain),
+      this.suppliersRepository.getMarketStructure(scope),
+      this.suppliersRepository.getTopBuyers(scope),
+      this.suppliersRepository.getTopProducts(scope),
+      this.suppliersRepository.getTopRegions(scope),
+      comparisonScope
+        ? this.suppliersRepository.getTrendPoints(
+            comparisonScope,
+            resolved.timeGrain,
+          )
+        : Promise.resolve([]),
+      comparisonScope
+        ? this.suppliersRepository.getTopBuyers(comparisonScope)
+        : Promise.resolve([]),
+      comparisonScope
+        ? this.suppliersRepository.getTopProducts(comparisonScope)
+        : Promise.resolve([]),
+      comparisonScope
+        ? this.suppliersRepository.getTopRegions(comparisonScope)
+        : Promise.resolve([]),
+    ]).then(
+      ([
+        currentKpi,
+        previousKpi,
+        currentTrend,
+        marketStructure,
+        topBuyers,
+        topProducts,
+        topRegions,
+        comparisonTrend,
+        previousTopBuyers,
+        previousTopProducts,
+        previousTopRegions,
+      ]) => ({
+        period: this.toPeriod(resolved),
+        comparison: this.toComparison(resolved),
+        kpi: this.buildKpi(currentKpi, previousKpi),
+        trend: this.buildTrend(
+          currentTrend,
+          comparisonTrend,
+          resolved.timeGrain,
+        ),
+        marketStructure,
+        topBuyers: this.buildTopEntities(topBuyers, previousTopBuyers),
+        topProducts: this.buildTopProducts(topProducts, previousTopProducts),
+        topRegions: this.buildTopRegions(topRegions, previousTopRegions),
+        insights: this.buildInsights({
+          kpi: this.buildKpi(currentKpi, previousKpi),
+          trend: this.buildTrend(
+            currentTrend,
+            comparisonTrend,
+            resolved.timeGrain,
+          ),
+          marketStructure,
+          topProducts: this.buildTopProducts(topProducts, previousTopProducts),
+          topRegions: this.buildTopRegions(topRegions, previousTopRegions),
+        }),
+      }),
+    );
+  }
+
+  getSuppliersTable(
+    user: AuthenticatedUser,
+    query: SuppliersTableQueryDto,
+  ): Promise<SuppliersTableResponseDto> {
+    const scope = this.suppliersRepository.createBaseScope(user.userId, query);
+    const resolved = this.resolveSuppliersContext(query);
+    const page = query.page ?? SUPPLIERS_ANALYTICS_DEFAULT_TABLE_PAGE;
+    const limit = query.limit ?? SUPPLIERS_ANALYTICS_DEFAULT_TABLE_LIMIT;
+    const sortBy = query.sortBy ?? SUPPLIERS_ANALYTICS_DEFAULT_TABLE_SORT_FIELD;
+    const sortDirection =
+      query.sortDirection ?? SUPPLIERS_ANALYTICS_DEFAULT_TABLE_SORT_DIRECTION;
+
+    if (!this.suppliersRepository.hasSelectedSuppliers(scope)) {
+      return Promise.resolve({
+        items: [],
+        total: 0,
+        page,
+        limit,
+      });
+    }
+
+    return this.suppliersRepository
+      .getSuppliersTable(scope, {
+        timeGrain: resolved.timeGrain,
+        page,
+        limit,
+        sortBy,
+        sortDirection,
+      })
+      .then((result) => ({
+        items: result.items.map((item) => ({
+          period: this.formatTablePeriod(item.periodStart, resolved.timeGrain),
+          supplierTaxNumber: item.supplierTaxNumber,
+          supplierName: item.supplierName,
+          buyerRegionCode: item.buyerRegionCode,
+          buyerRegionName: this.suppliersRepository.resolveRegionName(
+            item.buyerRegionCode,
+          ),
+          buyerTaxNumber: item.buyerTaxNumber,
+          buyerName: item.buyerName,
+          product: item.product,
+          uktzed: item.uktzed,
+          unit: item.unit,
+          quantity: item.quantity,
+          priceWithVat: item.priceWithVat,
+          salesWithVat: item.salesWithVat,
+        })),
+        total: result.total,
+        page,
+        limit,
+      }));
+  }
+
+  async getSuppliersRankings(
+    user: AuthenticatedUser,
+    query: SuppliersRankingsQueryDto,
+  ): Promise<SuppliersRankingsResponseDto> {
+    const scope = this.suppliersRepository.createBaseScope(user.userId, query);
+    const resolved = this.resolveSuppliersContext(query);
+    const comparisonScope = resolved.comparisonRange
+      ? {
+          ...scope,
+          dateRange: resolved.comparisonRange,
+        }
+      : null;
+    const page = query.page ?? SUPPLIERS_ANALYTICS_DEFAULT_RANKINGS_PAGE;
+    const limit = query.limit ?? SUPPLIERS_ANALYTICS_DEFAULT_RANKINGS_LIMIT;
+
+    if (!this.suppliersRepository.hasSelectedSuppliers(scope)) {
+      return {
+        items: [],
+        total: 0,
+        page,
+        limit,
+      };
+    }
+
+    switch (query.dimension) {
+      case 'buyers': {
+        const current = await this.suppliersRepository.getBuyerRankings(scope, {
+          page,
+          limit,
+        });
+        const previous = comparisonScope
+          ? await this.suppliersRepository.getBuyerRankingComparisonAmounts(
+              comparisonScope,
+              current.items.map((item) => item.id).filter(Boolean) as string[],
+            )
+          : [];
+
+        return {
+          items: this.buildTopEntities(current.items, previous),
+          total: current.total,
+          page,
+          limit,
+        };
+      }
+      case 'products': {
+        const current = await this.suppliersRepository.getProductRankings(
+          scope,
+          {
+            page,
+            limit,
+          },
+        );
+        const previous = comparisonScope
+          ? await this.suppliersRepository.getProductRankingComparisonAmounts(
+              comparisonScope,
+              current.items.flatMap((item) =>
+                item.name === null
+                  ? []
+                  : [
+                      {
+                        name: item.name,
+                        uktzed: item.uktzed,
+                      },
+                    ],
+              ),
+            )
+          : [];
+
+        return {
+          items: this.buildTopProducts(current.items, previous),
+          total: current.total,
+          page,
+          limit,
+        };
+      }
+      case 'regions': {
+        const current = await this.suppliersRepository.getRegionRankings(
+          scope,
+          {
+            page,
+            limit,
+          },
+        );
+        const previous = comparisonScope
+          ? await this.suppliersRepository.getRegionRankingComparisonAmounts(
+              comparisonScope,
+              current.items
+                .map((item) => item.regionCode)
+                .filter(Boolean) as string[],
+            )
+          : [];
+
+        return {
+          items: this.buildTopRegions(current.items, previous),
+          total: current.total,
+          page,
+          limit,
+        };
+      }
+    }
+  }
+
+  getFilterOptions(
+    user: AuthenticatedUser,
+    query: SuppliersFilterOptionsQueryDto,
+  ): Promise<SuppliersFilterOptionsResponseDto> {
+    const scope = this.suppliersRepository.createBaseScope(user.userId, query);
+    const page = query.page ?? SUPPLIERS_ANALYTICS_DEFAULT_FILTER_OPTIONS_PAGE;
+    const limit =
+      query.limit ?? SUPPLIERS_ANALYTICS_DEFAULT_FILTER_OPTIONS_LIMIT;
+
+    if (
+      query.dimension !== 'suppliers' &&
+      !this.suppliersRepository.hasSelectedSuppliers(scope)
+    ) {
+      return Promise.resolve({
+        dimension: query.dimension,
+        items: [],
+        total: 0,
+        page,
+        limit,
+      });
+    }
+
+    return this.suppliersRepository
+      .getFilterOptions(scope, query.dimension, {
+        search: query.search,
+        page,
+        limit,
+      })
+      .then((result) => ({
+        dimension: query.dimension,
+        items: result.items,
+        total: result.total,
+        page,
+        limit,
+      }));
+  }
+
+  exportSuppliers(
+    user: AuthenticatedUser,
+    query: SuppliersExportQueryDto,
+  ): Promise<SuppliersExportFile> {
+    const scope = this.suppliersRepository.createBaseScope(user.userId, query);
+    const resolved = this.resolveSuppliersContext(query);
+    const format = this.resolveExportFormat(query.format);
+    const fileName = `suppliers-report-${query.dateFrom}-${query.dateTo}.${format}`;
+    const sortBy = SUPPLIERS_ANALYTICS_DEFAULT_TABLE_SORT_FIELD;
+    const sortDirection = SUPPLIERS_ANALYTICS_DEFAULT_TABLE_SORT_DIRECTION;
+
+    if (!this.suppliersRepository.hasSelectedSuppliers(scope)) {
+      return this.buildEmptyExportFile(fileName, format);
+    }
+
+    return this.suppliersRepository
+      .getSuppliersTableExport(scope, {
+        timeGrain: resolved.timeGrain,
+        sortBy,
+        sortDirection,
+      })
+      .then((items) => {
+        const rows = items.map((item) => ({
+          Period: this.formatTablePeriod(item.periodStart, resolved.timeGrain),
+          'Supplier Tax Number': item.supplierTaxNumber,
+          Supplier: item.supplierName,
+          'Buyer Region Code': item.buyerRegionCode,
+          'Buyer Region Name': this.suppliersRepository.resolveRegionName(
+            item.buyerRegionCode,
+          ),
+          'Buyer Tax Number': item.buyerTaxNumber,
+          'Buyer Name': item.buyerName,
+          Product: item.product,
+          UKTZED: item.uktzed,
+          Unit: item.unit,
+          Quantity: item.quantity,
+          'Price With VAT': item.priceWithVat,
+          'Sales With VAT': item.salesWithVat,
+        }));
+
+        if (format === 'xlsx') {
+          const workbook = utils.book_new();
+          const worksheet =
+            rows.length > 0
+              ? utils.json_to_sheet(rows)
+              : utils.aoa_to_sheet([
+                  [
+                    'Period',
+                    'Supplier Tax Number',
+                    'Supplier',
+                    'Buyer Region Code',
+                    'Buyer Region Name',
+                    'Buyer Tax Number',
+                    'Buyer Name',
+                    'Product',
+                    'UKTZED',
+                    'Unit',
+                    'Quantity',
+                    'Price With VAT',
+                    'Sales With VAT',
+                  ],
+                ]);
+          utils.book_append_sheet(workbook, worksheet, 'Suppliers');
+          const workbookBuffer = write(workbook, {
+            bookType: 'xlsx',
+            type: 'buffer',
+          }) as Buffer<ArrayBufferLike>;
+
+          return {
+            buffer: workbookBuffer,
+            fileName,
+            mimeType:
+              'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          };
+        }
+
+        const worksheet =
+          rows.length > 0
+            ? utils.json_to_sheet(rows)
+            : utils.aoa_to_sheet([
+                [
+                  'Period',
+                  'Supplier Tax Number',
+                  'Supplier',
+                  'Buyer Region Code',
+                  'Buyer Region Name',
+                  'Buyer Tax Number',
+                  'Buyer Name',
+                  'Product',
+                  'UKTZED',
+                  'Unit',
+                  'Quantity',
+                  'Price With VAT',
+                  'Sales With VAT',
+                ],
+              ]);
+
+        return {
+          buffer: Buffer.from(utils.sheet_to_csv(worksheet), 'utf-8'),
+          fileName,
+          mimeType: 'text/csv; charset=utf-8',
+        };
+      });
+  }
+
+  private resolveExportFormat(format?: string) {
+    return SUPPLIERS_ANALYTICS_EXPORT_FORMATS.includes(
+      format as (typeof SUPPLIERS_ANALYTICS_EXPORT_FORMATS)[number],
+    )
+      ? (format as 'csv' | 'xlsx')
+      : 'csv';
+  }
+
+  private buildEmptyMetric() {
+    return {
+      current: 0,
+      previous: null,
+      deltaPercent: null,
+      hasComparablePrevious: false,
+    };
+  }
+
+  private buildEmptyDashboardResponse(
+    query: SuppliersQueryDto,
+    resolved: ResolvedSuppliersContext,
+  ): SuppliersResponseDto {
+    return {
+      period: this.toPeriod(resolved),
+      comparison: this.toComparison(resolved),
+      kpi: {
+        salesWithVat: this.buildEmptyMetric(),
+        activeBuyers: this.buildEmptyMetric(),
+        salesRegions: this.buildEmptyMetric(),
+        productPositions: this.buildEmptyMetric(),
+      },
+      trend: [],
+      marketStructure: {
+        topBuyer: null,
+        topBuyerRegion: null,
+        topUKTZED: null,
+        top5BuyersShare: null,
+      },
+      topBuyers: [],
+      topProducts: [],
+      topRegions: [],
+      insights: [],
+    };
+  }
+
+  private buildKpi(
+    current: {
+      salesWithVat: number;
+      activeBuyers: number;
+      salesRegions: number;
+      productPositions: number;
+    },
+    previous: {
+      salesWithVat: number;
+      activeBuyers: number;
+      salesRegions: number;
+      productPositions: number;
+    } | null,
+  ) {
+    return {
+      salesWithVat: this.buildMetric(
+        current.salesWithVat,
+        previous?.salesWithVat ?? null,
+      ),
+      activeBuyers: this.buildMetric(
+        current.activeBuyers,
+        previous?.activeBuyers ?? null,
+      ),
+      salesRegions: this.buildMetric(
+        current.salesRegions,
+        previous?.salesRegions ?? null,
+      ),
+      productPositions: this.buildMetric(
+        current.productPositions,
+        previous?.productPositions ?? null,
+      ),
+    };
+  }
+
+  private buildTrend(
+    current: Array<{
+      periodStart: Date;
+      salesWithVat: number;
+    }>,
+    comparison: Array<{
+      periodStart: Date;
+      salesWithVat: number;
+    }>,
+    timeGrain: SuppliersAnalyticsTimeGrain,
+  ) {
+    return current.map((point, index) => {
+      const comparisonPoint = comparison[index] ?? null;
+
+      return {
+        periodStart: this.formatDateOnly(point.periodStart),
+        periodLabel: this.formatPeriodLabel(point.periodStart, timeGrain),
+        salesWithVat: point.salesWithVat,
+        purchasesWithVat: 0,
+        comparisonSalesWithVat: comparisonPoint?.salesWithVat ?? null,
+        comparisonPurchasesWithVat: null,
+      };
+    });
+  }
+
+  private buildTopEntities(
+    current: Array<{
+      id: string | null;
+      name: string | null;
+      amount: number;
+      share: number;
+    }>,
+    previous: Array<{
+      id: string | null;
+      name: string | null;
+      amount: number;
+      share: number;
+    }>,
+  ) {
+    const previousById = new Map(
+      previous.map((item) => [item.id ?? item.name ?? '', item]),
+    );
+
+    return current.map((item) => {
+      const previousItem = previousById.get(item.id ?? item.name ?? '') ?? null;
+
+      return {
+        id: item.id,
+        name: item.name,
+        amount: item.amount,
+        share: item.share,
+        previousAmount: previousItem?.amount ?? null,
+        deltaPercent: this.calculateDeltaPercent(
+          item.amount,
+          previousItem?.amount ?? 0,
+        ),
+      };
+    });
+  }
+
+  private buildTopProducts(
+    current: Array<{
+      productId: string | null;
+      name: string | null;
+      uktzed: string | null;
+      amount: number;
+      share: number;
+    }>,
+    previous: Array<{
+      productId: string | null;
+      name: string | null;
+      uktzed: string | null;
+      amount: number;
+      share: number;
+    }>,
+  ) {
+    const previousByKey = new Map(
+      previous.map((item) => [
+        `${item.name ?? ''}::${item.uktzed ?? ''}`,
+        item,
+      ]),
+    );
+
+    return current.map((item) => {
+      const key = `${item.name ?? ''}::${item.uktzed ?? ''}`;
+      const previousItem = previousByKey.get(key) ?? null;
+
+      return {
+        productId: item.productId,
+        name: item.name,
+        uktzed: item.uktzed,
+        amount: item.amount,
+        share: item.share,
+        previousAmount: previousItem?.amount ?? null,
+        deltaPercent: this.calculateDeltaPercent(
+          item.amount,
+          previousItem?.amount ?? 0,
+        ),
+      };
+    });
+  }
+
+  private buildTopRegions(
+    current: Array<{
+      regionCode: string | null;
+      regionName: string | null;
+      amount: number;
+      share: number;
+      activeBuyers: number;
+    }>,
+    previous: Array<{
+      regionCode: string | null;
+      regionName: string | null;
+      amount: number;
+      share: number;
+      activeBuyers: number;
+    }>,
+  ) {
+    const previousByCode = new Map(
+      previous.map((item) => [item.regionCode ?? '', item]),
+    );
+
+    return current.map((item) => {
+      const previousItem = previousByCode.get(item.regionCode ?? '') ?? null;
+
+      return {
+        regionCode: item.regionCode,
+        regionName: item.regionName,
+        amount: item.amount,
+        share: item.share,
+        activeBuyers: item.activeBuyers,
+        previousAmount: previousItem?.amount ?? null,
+        deltaPercent: this.calculateDeltaPercent(
+          item.amount,
+          previousItem?.amount ?? 0,
+        ),
+      };
+    });
+  }
+
+  private buildInsights(input: {
+    kpi: Record<
+      string,
+      {
+        current: number;
+        previous: number | null;
+        deltaPercent: number | null;
+        hasComparablePrevious: boolean;
+      }
+    >;
+    trend: Array<{
+      periodStart: string;
+      periodLabel: string;
+      salesWithVat: number;
+      purchasesWithVat: number;
+      comparisonSalesWithVat: number | null;
+      comparisonPurchasesWithVat: number | null;
+    }>;
+    marketStructure: {
+      topBuyer: {
+        id: string | null;
+        name: string | null;
+        amount: number;
+        share: number;
+      } | null;
+      topBuyerRegion: {
+        regionCode: string | null;
+        regionName: string | null;
+        amount: number;
+        share: number;
+      } | null;
+      topUKTZED: {
+        code: string | null;
+        name: string | null;
+        description: string | null;
+        amount: number;
+        share: number;
+      } | null;
+      top5BuyersShare: number | null;
+    };
+    topProducts: Array<{
+      productId: string | null;
+      name: string | null;
+      uktzed: string | null;
+      amount: number;
+      share: number;
+      previousAmount: number | null;
+      deltaPercent: number | null;
+    }>;
+    topRegions: Array<{
+      regionCode: string | null;
+      regionName: string | null;
+      amount: number;
+      share: number;
+      activeBuyers: number;
+      previousAmount: number | null;
+      deltaPercent: number | null;
+    }>;
+  }) {
+    const peakSalesPeriod = this.getPeakSalesPeriod(input.trend);
+    const topRegion =
+      input.marketStructure.topBuyerRegion ?? input.topRegions[0] ?? null;
+    const topRegionDetails = topRegion
+      ? (input.topRegions.find(
+          (item) => item.regionCode === topRegion.regionCode,
+        ) ?? null)
+      : null;
+
+    return [
+      {
+        type: 'SALES_CHANGE',
+        payload: {
+          deltaPercent: input.kpi.salesWithVat.deltaPercent,
+        },
+      },
+      {
+        type: 'PEAK_SALES_PERIOD',
+        payload: {
+          periodLabel: peakSalesPeriod?.periodLabel ?? null,
+          amount: peakSalesPeriod?.amount ?? 0,
+        },
+      },
+      {
+        type: 'BUYER_CONCENTRATION',
+        payload: {
+          top5Share: input.marketStructure.top5BuyersShare,
+          topBuyer: input.marketStructure.topBuyer,
+        },
+      },
+      {
+        type: 'PRODUCT_CONCENTRATION',
+        payload: {
+          top5Share: this.sumTopShares(input.topProducts),
+        },
+      },
+      {
+        type: 'REGION_CONCENTRATION',
+        payload: {
+          top5Share: this.sumTopShares(input.topRegions),
+        },
+      },
+      {
+        type: 'TOP_REGION',
+        payload: {
+          regionCode: topRegion?.regionCode ?? null,
+          regionName: topRegion?.regionName ?? null,
+          amount: topRegion?.amount ?? 0,
+          share: topRegion?.share ?? 0,
+          activeBuyers: topRegionDetails?.activeBuyers ?? 0,
+          previousAmount: topRegionDetails?.previousAmount ?? null,
+          deltaPercent: topRegionDetails?.deltaPercent ?? null,
+        },
+      },
+    ];
+  }
+
+  private getPeakSalesPeriod(
+    trend: Array<{
+      periodStart: string;
+      periodLabel: string;
+      salesWithVat: number;
+      purchasesWithVat: number;
+      comparisonSalesWithVat: number | null;
+      comparisonPurchasesWithVat: number | null;
+    }>,
+  ): {
+    periodLabel: string;
+    amount: number;
+  } | null {
+    if (trend.length === 0) {
+      return null;
+    }
+
+    const peak = trend.reduce((best, item) =>
+      item.salesWithVat > best.salesWithVat ? item : best,
+    );
+
+    return {
+      periodLabel: peak.periodLabel,
+      amount: peak.salesWithVat,
+    };
+  }
+
+  private sumTopShares(
+    items: Array<{
+      share: number;
+    }>,
+  ): number {
+    return items.reduce((total, item) => total + item.share, 0);
+  }
+
+  private buildEmptyExportFile(
+    fileName: string,
+    format: 'csv' | 'xlsx',
+  ): Promise<SuppliersExportFile> {
+    if (format === 'xlsx') {
+      const workbook = utils.book_new();
+      const worksheet = utils.aoa_to_sheet([
+        [
+          'Period',
+          'Supplier Tax Number',
+          'Supplier',
+          'Buyer Region Code',
+          'Buyer Region Name',
+          'Buyer Tax Number',
+          'Buyer Name',
+          'Product',
+          'UKTZED',
+          'Unit',
+          'Quantity',
+          'Price With VAT',
+          'Sales With VAT',
+        ],
+      ]);
+      utils.book_append_sheet(workbook, worksheet, 'Suppliers');
+      const workbookBuffer = write(workbook, {
+        bookType: 'xlsx',
+        type: 'buffer',
+      }) as Buffer<ArrayBufferLike>;
+
+      return Promise.resolve({
+        buffer: workbookBuffer,
+        fileName,
+        mimeType:
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+    }
+
+    return Promise.resolve({
+      buffer: Buffer.from(
+        'Period,Supplier Tax Number,Supplier,Buyer Region Code,Buyer Region Name,Buyer Tax Number,Buyer Name,Product,UKTZED,Unit,Quantity,Price With VAT,Sales With VAT\n',
+      ),
+      fileName,
+      mimeType: 'text/csv',
+    });
+  }
+
+  private resolveSuppliersContext(
+    query: Pick<
+      SuppliersQueryDto | SuppliersExportQueryDto,
+      | 'dateFrom'
+      | 'dateTo'
+      | 'comparisonMode'
+      | 'compareDateFrom'
+      | 'compareDateTo'
+      | 'timeGrain'
+    >,
+  ): ResolvedSuppliersContext {
+    const currentRange = this.resolveDateRange(query.dateFrom, query.dateTo);
+    const comparisonMode = query.comparisonMode ?? 'NONE';
+    const comparisonRange = this.resolveComparisonRange(currentRange, {
+      comparisonMode,
+      compareDateFrom: query.compareDateFrom,
+      compareDateTo: query.compareDateTo,
+    });
+    const timeGrain = this.resolveTimeGrain(currentRange, query.timeGrain);
+
+    return {
+      currentRange,
+      comparisonMode,
+      comparisonRange,
+      timeGrain,
+    };
+  }
+
+  private resolveDateRange(
+    dateFrom: string,
+    dateTo: string,
+  ): ResolvedDateRange {
+    const from = this.parseDateOnly(dateFrom);
+    const to = this.parseDateOnly(dateTo);
+
+    if (from.getTime() > to.getTime()) {
+      throw new BadRequestException(
+        'dateFrom must be before or equal to dateTo.',
+      );
+    }
+
+    return { from, to };
+  }
+
+  private resolveComparisonRange(
+    currentRange: ResolvedDateRange,
+    options: {
+      comparisonMode: SuppliersAnalyticsComparisonMode;
+      compareDateFrom?: string;
+      compareDateTo?: string;
+    },
+  ): ResolvedDateRange | null {
+    switch (options.comparisonMode) {
+      case 'NONE':
+        return null;
+      case 'PREVIOUS_PERIOD':
+        return this.resolvePreviousPeriod(currentRange);
+      case 'CUSTOM':
+        if (!options.compareDateFrom || !options.compareDateTo) {
+          throw new BadRequestException(
+            'compareDateFrom and compareDateTo are required for CUSTOM comparison mode.',
+          );
+        }
+
+        return this.resolveDateRange(
+          options.compareDateFrom,
+          options.compareDateTo,
+        );
+    }
+  }
+
+  private resolvePreviousPeriod(
+    currentRange: ResolvedDateRange,
+  ): ResolvedDateRange {
+    const periodLengthInDays = this.getInclusiveDayCount(currentRange);
+    const previousPeriodEnd = this.shiftDate(currentRange.from, -1);
+    const previousPeriodStart = this.shiftDate(
+      previousPeriodEnd,
+      -(periodLengthInDays - 1),
+    );
+
+    return {
+      from: previousPeriodStart,
+      to: previousPeriodEnd,
+    };
+  }
+
+  private resolveTimeGrain(
+    currentRange: ResolvedDateRange,
+    requestedTimeGrain?: SuppliersAnalyticsTimeGrain,
+  ): SuppliersAnalyticsTimeGrain {
+    if (requestedTimeGrain) {
+      return requestedTimeGrain;
+    }
+
+    const days = this.getInclusiveDayCount(currentRange);
+
+    if (days <= 730) {
+      return 'MONTH';
+    }
+
+    if (days <= 3650) {
+      return 'QUARTER';
+    }
+
+    return 'YEAR';
+  }
+
+  private buildMetric(current: number, previous: number | null) {
+    return {
+      current,
+      previous,
+      deltaPercent:
+        previous === null
+          ? null
+          : this.calculateDeltaPercent(current, previous),
+      hasComparablePrevious: previous !== null && previous !== 0,
+    };
+  }
+
+  private calculateDeltaPercent(current: number, previous: number) {
+    if (previous === 0) {
+      return null;
+    }
+
+    return Number((((current - previous) / previous) * 100).toFixed(2));
+  }
+
+  private getInclusiveDayCount(range: ResolvedDateRange): number {
+    const millisecondsPerDay = 24 * 60 * 60 * 1000;
+
+    return (
+      Math.floor(
+        (range.to.getTime() - range.from.getTime()) / millisecondsPerDay,
+      ) + 1
+    );
+  }
+
+  private parseDateOnly(value: string): Date {
+    return new Date(`${value}T00:00:00.000Z`);
+  }
+
+  private shiftDate(value: Date, days: number): Date {
+    const shifted = new Date(value);
+    shifted.setUTCDate(shifted.getUTCDate() + days);
+
+    return shifted;
+  }
+
+  private formatDateOnly(value: Date): string {
+    return value.toISOString().slice(0, 10);
+  }
+
+  private formatPeriodLabel(
+    value: Date,
+    timeGrain: SuppliersAnalyticsTimeGrain,
+  ): string {
+    const year = value.getUTCFullYear();
+    const month = value.getUTCMonth() + 1;
+
+    switch (timeGrain) {
+      case 'MONTH':
+        return `${year}-${String(month).padStart(2, '0')}`;
+      case 'QUARTER':
+        return `Q${Math.floor((month - 1) / 3) + 1} ${year}`;
+      case 'YEAR':
+        return String(year);
+    }
+  }
+
+  private formatTablePeriod(
+    value: Date,
+    timeGrain: SuppliersAnalyticsTimeGrain,
+  ): string {
+    const year = value.getUTCFullYear();
+    const month = value.getUTCMonth() + 1;
+
+    switch (timeGrain) {
+      case 'MONTH':
+        return `${year}-${String(month).padStart(2, '0')}`;
+      case 'QUARTER':
+        return `${year}-Q${Math.floor((month - 1) / 3) + 1}`;
+      case 'YEAR':
+        return String(year);
+    }
+  }
+
+  private toPeriod(resolved: ResolvedSuppliersContext) {
+    return {
+      dateFrom: this.formatDateOnly(resolved.currentRange.from),
+      dateTo: this.formatDateOnly(resolved.currentRange.to),
+      timeGrain: resolved.timeGrain,
+    };
+  }
+
+  private toComparison(resolved: ResolvedSuppliersContext) {
+    return {
+      mode: resolved.comparisonMode,
+      dateFrom: resolved.comparisonRange
+        ? this.formatDateOnly(resolved.comparisonRange.from)
+        : null,
+      dateTo: resolved.comparisonRange
+        ? this.formatDateOnly(resolved.comparisonRange.to)
+        : null,
+    };
+  }
+}

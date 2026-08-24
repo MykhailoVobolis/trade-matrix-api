@@ -12,13 +12,14 @@ import type {
   AnalyticsBaseScope,
   AnalyticsCompanyIdentity,
   AnalyticsFilterOptionDimension,
-  AnalyticsOverviewTableItem,
   AnalyticsKpiTotals,
   AnalyticsMarketEntity,
   AnalyticsMarketRegion,
   AnalyticsMarketStructure,
   AnalyticsMarketUktzed,
+  AnalyticsOverviewTableItem,
   AnalyticsOverviewTableResult,
+  AnalyticsRankingResult,
   AnalyticsTimeGrain,
   AnalyticsTableSortField,
   AnalyticsTopEntity,
@@ -445,6 +446,140 @@ export class OverviewRepository {
     }));
   }
 
+  async getBuyerRankings(
+    scope: AnalyticsBaseScope,
+    options: { page: number; limit: number },
+  ): Promise<AnalyticsRankingResult<AnalyticsTopEntity>> {
+    return this.getEntityRankings(scope, options, 'buyer');
+  }
+
+  async getSupplierRankings(
+    scope: AnalyticsBaseScope,
+    options: { page: number; limit: number },
+  ): Promise<AnalyticsRankingResult<AnalyticsTopEntity>> {
+    return this.getEntityRankings(scope, options, 'supplier');
+  }
+
+  async getBuyerRankingComparisonAmounts(
+    scope: AnalyticsBaseScope,
+    ids: string[],
+  ): Promise<AnalyticsTopEntity[]> {
+    return this.getEntityRankingComparisonAmounts(scope, ids, 'buyer');
+  }
+
+  async getSupplierRankingComparisonAmounts(
+    scope: AnalyticsBaseScope,
+    ids: string[],
+  ): Promise<AnalyticsTopEntity[]> {
+    return this.getEntityRankingComparisonAmounts(scope, ids, 'supplier');
+  }
+
+  async getProductRankings(
+    scope: AnalyticsBaseScope,
+    options: { page: number; limit: number },
+  ): Promise<AnalyticsRankingResult<AnalyticsTopProduct>> {
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        productId: string | null;
+        name: string | null;
+        uktzed: string | null;
+        amount: Prisma.Decimal | null;
+        share: Prisma.Decimal | null;
+        totalCount: bigint | number;
+      }>
+    >(this.buildProductRankingsQuery(scope, options));
+
+    return {
+      items: rows.map((row) => ({
+        productId: row.productId,
+        name: row.name,
+        uktzed: row.uktzed,
+        amount: Number(row.amount ?? 0),
+        share: Number(row.share ?? 0),
+      })),
+      total: Number(rows[0]?.totalCount ?? 0),
+    };
+  }
+
+  async getProductRankingComparisonAmounts(
+    scope: AnalyticsBaseScope,
+    keys: Array<{ name: string; uktzed: string | null }>,
+  ): Promise<AnalyticsTopProduct[]> {
+    if (keys.length === 0) {
+      return [];
+    }
+
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        productId: string | null;
+        name: string | null;
+        uktzed: string | null;
+        amount: Prisma.Decimal | null;
+        share: Prisma.Decimal | null;
+      }>
+    >(this.buildProductComparisonAmountsQuery(scope, keys));
+
+    return rows.map((row) => ({
+      productId: row.productId,
+      name: row.name,
+      uktzed: row.uktzed,
+      amount: Number(row.amount ?? 0),
+      share: Number(row.share ?? 0),
+    }));
+  }
+
+  async getRegionRankings(
+    scope: AnalyticsBaseScope,
+    options: { page: number; limit: number },
+  ): Promise<AnalyticsRankingResult<AnalyticsTopRegion>> {
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        regionCode: string | null;
+        amount: Prisma.Decimal | null;
+        share: Prisma.Decimal | null;
+        activeBuyers: bigint | number;
+        totalCount: bigint | number;
+      }>
+    >(this.buildRegionRankingsQuery(scope, options));
+
+    return {
+      items: rows.map((row) => ({
+        regionCode: this.resolveRegionCode(row.regionCode),
+        regionName: this.resolveRegionName(row.regionCode),
+        amount: Number(row.amount ?? 0),
+        share: Number(row.share ?? 0),
+        activeBuyers: Number(row.activeBuyers ?? 0),
+      })),
+      total: Number(rows[0]?.totalCount ?? 0),
+    };
+  }
+
+  async getRegionRankingComparisonAmounts(
+    scope: AnalyticsBaseScope,
+    regionCodes: string[],
+  ): Promise<AnalyticsTopRegion[]> {
+    if (regionCodes.length === 0) {
+      return [];
+    }
+
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        regionCode: string | null;
+        amount: Prisma.Decimal | null;
+        share: Prisma.Decimal | null;
+        activeBuyers: bigint | number;
+      }>
+    >(this.buildRegionComparisonAmountsQuery(scope, regionCodes));
+
+    return rows.map((row) => ({
+      regionCode: this.resolveRegionCode(row.regionCode),
+      regionName: this.resolveRegionName(row.regionCode),
+      amount: Number(row.amount ?? 0),
+      share: Number(row.share ?? 0),
+      activeBuyers: Number(row.activeBuyers ?? 0),
+    }));
+  }
+
   async getFilterOptions(
     scope: AnalyticsBaseScope,
     dimension: AnalyticsFilterOptionDimension,
@@ -517,7 +652,6 @@ export class OverviewRepository {
         quantity: Prisma.Decimal | null;
         priceWithVat: Prisma.Decimal | null;
         salesWithVat: Prisma.Decimal | null;
-        marketShare: Prisma.Decimal | null;
         totalCount: bigint | number;
       }>
     >(Prisma.sql`
@@ -556,10 +690,7 @@ export class OverviewRepository {
         GROUP BY 1, 2, 3, 5, 7, 8, 9
       ),
       totals AS (
-        SELECT
-          COUNT(*) AS total_count,
-          COALESCE(SUM(grouped.sales_with_vat + grouped.purchases_with_vat), 0) AS total_market_amount
-        FROM grouped
+        SELECT COUNT(*) AS total_count FROM grouped
       )
       SELECT
         grouped.period_start AS "periodStart",
@@ -579,11 +710,6 @@ export class OverviewRepository {
           ELSE NULL
         END AS "priceWithVat",
         grouped.sales_with_vat AS "salesWithVat",
-        CASE
-          WHEN totals.total_market_amount = 0 THEN 0
-          ELSE (grouped.sales_with_vat + grouped.purchases_with_vat)
-            / totals.total_market_amount * 100
-        END AS "marketShare",
         totals.total_count AS "totalCount"
       FROM grouped
       CROSS JOIN totals
@@ -643,7 +769,6 @@ export class OverviewRepository {
         quantity: Prisma.Decimal | null;
         priceWithVat: Prisma.Decimal | null;
         salesWithVat: Prisma.Decimal | null;
-        marketShare: Prisma.Decimal | null;
       }>
     >(Prisma.sql`
       WITH grouped AS (
@@ -681,9 +806,7 @@ export class OverviewRepository {
         GROUP BY 1, 2, 3, 5, 7, 8, 9
       ),
       totals AS (
-        SELECT
-          COALESCE(SUM(grouped.sales_with_vat + grouped.purchases_with_vat), 0) AS total_market_amount
-        FROM grouped
+        SELECT 1
       )
       SELECT
         grouped.period_start AS "periodStart",
@@ -702,12 +825,7 @@ export class OverviewRepository {
           WHEN grouped.purchases_with_vat <> 0 THEN grouped.purchases_with_vat / grouped.quantity
           ELSE NULL
         END AS "priceWithVat",
-        grouped.sales_with_vat AS "salesWithVat",
-        CASE
-          WHEN totals.total_market_amount = 0 THEN 0
-          ELSE (grouped.sales_with_vat + grouped.purchases_with_vat)
-            / totals.total_market_amount * 100
-        END AS "marketShare"
+        grouped.sales_with_vat AS "salesWithVat"
       FROM grouped
       CROSS JOIN totals
       ORDER BY ${orderBySql}
@@ -1503,7 +1621,6 @@ export class OverviewRepository {
     quantity: Prisma.Decimal | null;
     priceWithVat: Prisma.Decimal | null;
     salesWithVat: Prisma.Decimal | null;
-    marketShare: Prisma.Decimal | null;
   }): AnalyticsOverviewTableItem {
     return {
       periodStart: row.periodStart,
@@ -1518,7 +1635,6 @@ export class OverviewRepository {
       quantity: row.quantity === null ? null : Number(row.quantity),
       priceWithVat: row.priceWithVat === null ? null : Number(row.priceWithVat),
       salesWithVat: Number(row.salesWithVat ?? 0),
-      marketShare: Number(row.marketShare ?? 0),
     };
   }
 
@@ -1575,9 +1691,380 @@ export class OverviewRepository {
         return Prisma.sql`"priceWithVat" ${directionSql} NULLS LAST, grouped.period_start DESC`;
       case 'salesWithVat':
         return Prisma.sql`grouped.sales_with_vat ${directionSql}, grouped.period_start DESC`;
-      case 'marketShare':
-        return Prisma.sql`"marketShare" ${directionSql}, grouped.period_start DESC`;
     }
+  }
+
+  private async getEntityRankings(
+    scope: AnalyticsBaseScope,
+    options: { page: number; limit: number },
+    role: 'buyer' | 'supplier',
+  ): Promise<AnalyticsRankingResult<AnalyticsTopEntity>> {
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        id: string | null;
+        name: string | null;
+        amount: Prisma.Decimal | null;
+        share: Prisma.Decimal | null;
+        totalCount: bigint | number;
+      }>
+    >(this.buildEntityRankingsQuery(scope, options, role));
+
+    return {
+      items: rows
+        .map((row) => this.toMarketEntity(row))
+        .filter((item): item is AnalyticsTopEntity => item !== null),
+      total: Number(rows[0]?.totalCount ?? 0),
+    };
+  }
+
+  private async getEntityRankingComparisonAmounts(
+    scope: AnalyticsBaseScope,
+    ids: string[],
+    role: 'buyer' | 'supplier',
+  ): Promise<AnalyticsTopEntity[]> {
+    if (ids.length === 0) {
+      return [];
+    }
+
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        id: string | null;
+        name: string | null;
+        amount: Prisma.Decimal | null;
+        share: Prisma.Decimal | null;
+      }>
+    >(this.buildEntityComparisonAmountsQuery(scope, ids, role));
+
+    return rows
+      .map((row) => this.toMarketEntity(row))
+      .filter((item): item is AnalyticsTopEntity => item !== null);
+  }
+
+  private buildEntityRankingsQuery(
+    scope: AnalyticsBaseScope,
+    options: { page: number; limit: number },
+    role: 'buyer' | 'supplier',
+  ): Prisma.Sql {
+    const offset = (options.page - 1) * options.limit;
+    const amountWithVatSql = this.amountWithVatSql();
+    const buyerIdentitySql = this.buildCompanyIdentitySql(
+      'record."buyer_tax_number"',
+      'record."buyer_name"',
+    );
+    const supplierIdentitySql = this.buildCompanyIdentitySql(
+      'record."seller_tax_number"',
+      'record."seller_name"',
+    );
+    const identitySql =
+      role === 'buyer' ? buyerIdentitySql : supplierIdentitySql;
+    const nameColumn =
+      role === 'buyer'
+        ? Prisma.raw('record."buyer_name"')
+        : Prisma.raw('record."seller_name"');
+    const gatingSql = role === 'buyer' ? supplierIdentitySql : buyerIdentitySql;
+    const whereSql = this.buildBaseScopeSql(scope);
+
+    return Prisma.sql`
+      WITH grouped AS (
+        SELECT
+          ${identitySql} AS id,
+          MIN(NULLIF(BTRIM(${nameColumn}), '')) AS name,
+          SUM(${amountWithVatSql}) AS amount
+        FROM "RegistryRecord" AS record
+        WHERE ${whereSql}
+          AND ${gatingSql} IS NOT NULL
+          AND ${identitySql} IS NOT NULL
+        GROUP BY 1
+      ),
+      totals AS (
+        SELECT
+          COUNT(*) AS total_count,
+          COALESCE(SUM(amount), 0) AS total_amount
+        FROM grouped
+      )
+      SELECT
+        grouped.id AS id,
+        grouped.name AS name,
+        grouped.amount AS amount,
+        CASE
+          WHEN totals.total_amount = 0 THEN 0
+          ELSE grouped.amount / totals.total_amount * 100
+        END AS share,
+        totals.total_count AS "totalCount"
+      FROM grouped
+      CROSS JOIN totals
+      ORDER BY grouped.amount DESC, grouped.id ASC
+      LIMIT ${options.limit}
+      OFFSET ${offset}
+    `;
+  }
+
+  private buildEntityComparisonAmountsQuery(
+    scope: AnalyticsBaseScope,
+    ids: string[],
+    role: 'buyer' | 'supplier',
+  ): Prisma.Sql {
+    const amountWithVatSql = this.amountWithVatSql();
+    const buyerIdentitySql = this.buildCompanyIdentitySql(
+      'record."buyer_tax_number"',
+      'record."buyer_name"',
+    );
+    const supplierIdentitySql = this.buildCompanyIdentitySql(
+      'record."seller_tax_number"',
+      'record."seller_name"',
+    );
+    const identitySql =
+      role === 'buyer' ? buyerIdentitySql : supplierIdentitySql;
+    const nameColumn =
+      role === 'buyer'
+        ? Prisma.raw('record."buyer_name"')
+        : Prisma.raw('record."seller_name"');
+    const gatingSql = role === 'buyer' ? supplierIdentitySql : buyerIdentitySql;
+    const whereSql = this.buildBaseScopeSql(scope);
+
+    return Prisma.sql`
+      WITH grouped AS (
+        SELECT
+          ${identitySql} AS id,
+          MIN(NULLIF(BTRIM(${nameColumn}), '')) AS name,
+          SUM(${amountWithVatSql}) AS amount
+        FROM "RegistryRecord" AS record
+        WHERE ${whereSql}
+          AND ${gatingSql} IS NOT NULL
+          AND ${identitySql} IS NOT NULL
+          AND ${this.buildSqlEqualsAnyCondition(identitySql, ids)}
+        GROUP BY 1
+      ),
+      totals AS (
+        SELECT COALESCE(SUM(amount), 0) AS total_amount FROM grouped
+      )
+      SELECT
+        grouped.id AS id,
+        grouped.name AS name,
+        grouped.amount AS amount,
+        CASE
+          WHEN totals.total_amount = 0 THEN 0
+          ELSE grouped.amount / totals.total_amount * 100
+        END AS share
+      FROM grouped
+      CROSS JOIN totals
+      ORDER BY grouped.amount DESC, grouped.id ASC
+    `;
+  }
+
+  private buildProductRankingsQuery(
+    scope: AnalyticsBaseScope,
+    options: { page: number; limit: number },
+  ): Prisma.Sql {
+    const offset = (options.page - 1) * options.limit;
+    const supplierIdentitySql = this.buildCompanyIdentitySql(
+      'record."seller_tax_number"',
+      'record."seller_name"',
+    );
+    const outputProductSql = this.buildOutputProductSql();
+    const outputUktzedSql = this.buildOutputUktzedSql();
+    const amountWithVatSql = this.amountWithVatSql();
+    const whereSql = this.buildBaseScopeSql(scope);
+
+    return Prisma.sql`
+      WITH grouped AS (
+        SELECT
+          NULLIF(${outputProductSql}, '') AS product_id,
+          NULLIF(${outputProductSql}, '') AS name,
+          NULLIF(${outputUktzedSql}, '') AS uktzed,
+          SUM(${amountWithVatSql}) AS amount
+        FROM "RegistryRecord" AS record
+        WHERE ${whereSql}
+          AND ${supplierIdentitySql} IS NOT NULL
+          AND NULLIF(${outputProductSql}, '') IS NOT NULL
+        GROUP BY 1, 2, 3
+      ),
+      totals AS (
+        SELECT
+          COUNT(*) AS total_count,
+          COALESCE(SUM(amount), 0) AS total_amount
+        FROM grouped
+      )
+      SELECT
+        grouped.product_id AS "productId",
+        grouped.name AS name,
+        grouped.uktzed AS uktzed,
+        grouped.amount AS amount,
+        CASE
+          WHEN totals.total_amount = 0 THEN 0
+          ELSE grouped.amount / totals.total_amount * 100
+        END AS share,
+        totals.total_count AS "totalCount"
+      FROM grouped
+      CROSS JOIN totals
+      ORDER BY grouped.amount DESC, grouped.name ASC NULLS LAST
+      LIMIT ${options.limit}
+      OFFSET ${offset}
+    `;
+  }
+
+  private buildProductComparisonAmountsQuery(
+    scope: AnalyticsBaseScope,
+    keys: Array<{ name: string; uktzed: string | null }>,
+  ): Prisma.Sql {
+    const supplierIdentitySql = this.buildCompanyIdentitySql(
+      'record."seller_tax_number"',
+      'record."seller_name"',
+    );
+    const outputProductSql = this.buildOutputProductSql();
+    const outputUktzedSql = this.buildOutputUktzedSql();
+    const amountWithVatSql = this.amountWithVatSql();
+    const whereSql = this.buildBaseScopeSql(scope);
+    const keyConditions = keys.map((key) =>
+      key.uktzed === null
+        ? Prisma.sql`
+            (
+              NULLIF(${outputProductSql}, '') = ${key.name}
+              AND NULLIF(${outputUktzedSql}, '') IS NULL
+            )
+          `
+        : Prisma.sql`
+            (
+              NULLIF(${outputProductSql}, '') = ${key.name}
+              AND NULLIF(${outputUktzedSql}, '') = ${key.uktzed}
+            )
+          `,
+    );
+
+    return Prisma.sql`
+      WITH grouped AS (
+        SELECT
+          NULLIF(${outputProductSql}, '') AS product_id,
+          NULLIF(${outputProductSql}, '') AS name,
+          NULLIF(${outputUktzedSql}, '') AS uktzed,
+          SUM(${amountWithVatSql}) AS amount
+        FROM "RegistryRecord" AS record
+        WHERE ${whereSql}
+          AND ${supplierIdentitySql} IS NOT NULL
+          AND NULLIF(${outputProductSql}, '') IS NOT NULL
+          AND (${Prisma.join(keyConditions, ' OR ')})
+        GROUP BY 1, 2, 3
+      ),
+      totals AS (
+        SELECT COALESCE(SUM(amount), 0) AS total_amount FROM grouped
+      )
+      SELECT
+        grouped.product_id AS "productId",
+        grouped.name AS name,
+        grouped.uktzed AS uktzed,
+        grouped.amount AS amount,
+        CASE
+          WHEN totals.total_amount = 0 THEN 0
+          ELSE grouped.amount / totals.total_amount * 100
+        END AS share
+      FROM grouped
+      CROSS JOIN totals
+      ORDER BY grouped.amount DESC, grouped.name ASC NULLS LAST
+    `;
+  }
+
+  private buildRegionRankingsQuery(
+    scope: AnalyticsBaseScope,
+    options: { page: number; limit: number },
+  ): Prisma.Sql {
+    const offset = (options.page - 1) * options.limit;
+    const supplierIdentitySql = this.buildCompanyIdentitySql(
+      'record."seller_tax_number"',
+      'record."seller_name"',
+    );
+    const buyerIdentitySql = this.buildCompanyIdentitySql(
+      'record."buyer_tax_number"',
+      'record."buyer_name"',
+    );
+    const amountWithVatSql = this.amountWithVatSql();
+    const regionSql = this.buildResolvedRegionGroupSql(
+      'record."buyer_region_code"',
+    );
+    const whereSql = this.buildBaseScopeSql(scope);
+
+    return Prisma.sql`
+      WITH grouped AS (
+        SELECT
+          ${regionSql} AS region_code,
+          SUM(${amountWithVatSql}) AS amount,
+          COUNT(DISTINCT ${buyerIdentitySql}) AS active_buyers
+        FROM "RegistryRecord" AS record
+        WHERE ${whereSql}
+          AND ${supplierIdentitySql} IS NOT NULL
+          AND ${buyerIdentitySql} IS NOT NULL
+          AND ${regionSql} IS NOT NULL
+        GROUP BY 1
+      ),
+      totals AS (
+        SELECT
+          COUNT(*) AS total_count,
+          COALESCE(SUM(amount), 0) AS total_amount
+        FROM grouped
+      )
+      SELECT
+        grouped.region_code AS "regionCode",
+        grouped.amount AS amount,
+        CASE
+          WHEN totals.total_amount = 0 THEN 0
+          ELSE grouped.amount / totals.total_amount * 100
+        END AS share,
+        grouped.active_buyers AS "activeBuyers",
+        totals.total_count AS "totalCount"
+      FROM grouped
+      CROSS JOIN totals
+      ORDER BY grouped.amount DESC, grouped.region_code ASC
+      LIMIT ${options.limit}
+      OFFSET ${offset}
+    `;
+  }
+
+  private buildRegionComparisonAmountsQuery(
+    scope: AnalyticsBaseScope,
+    regionCodes: string[],
+  ): Prisma.Sql {
+    const supplierIdentitySql = this.buildCompanyIdentitySql(
+      'record."seller_tax_number"',
+      'record."seller_name"',
+    );
+    const buyerIdentitySql = this.buildCompanyIdentitySql(
+      'record."buyer_tax_number"',
+      'record."buyer_name"',
+    );
+    const amountWithVatSql = this.amountWithVatSql();
+    const regionSql = this.buildResolvedRegionGroupSql(
+      'record."buyer_region_code"',
+    );
+    const whereSql = this.buildBaseScopeSql(scope);
+
+    return Prisma.sql`
+      WITH grouped AS (
+        SELECT
+          ${regionSql} AS region_code,
+          SUM(${amountWithVatSql}) AS amount,
+          COUNT(DISTINCT ${buyerIdentitySql}) AS active_buyers
+        FROM "RegistryRecord" AS record
+        WHERE ${whereSql}
+          AND ${supplierIdentitySql} IS NOT NULL
+          AND ${buyerIdentitySql} IS NOT NULL
+          AND ${regionSql} IS NOT NULL
+          AND ${this.buildSqlEqualsAnyCondition(regionSql, regionCodes)}
+        GROUP BY 1
+      ),
+      totals AS (
+        SELECT COALESCE(SUM(amount), 0) AS total_amount FROM grouped
+      )
+      SELECT
+        grouped.region_code AS "regionCode",
+        grouped.amount AS amount,
+        CASE
+          WHEN totals.total_amount = 0 THEN 0
+          ELSE grouped.amount / totals.total_amount * 100
+        END AS share,
+        grouped.active_buyers AS "activeBuyers"
+      FROM grouped
+      CROSS JOIN totals
+      ORDER BY grouped.amount DESC, grouped.region_code ASC
+    `;
   }
 
   private buildTopEntityQuery(
