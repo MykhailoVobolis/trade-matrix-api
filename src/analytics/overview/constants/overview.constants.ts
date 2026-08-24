@@ -82,6 +82,31 @@ export const ANALYTICS_REGION_DICTIONARY = {
 export const ANALYTICS_UNKNOWN_REGION_NAME = 'Не визначено';
 export const ANALYTICS_UNKNOWN_REGION_CODE = 'unknown';
 
+export function formatAnalyticsRegionName(
+  regionName: string | null,
+): string | null {
+  if (!regionName) {
+    return null;
+  }
+
+  if (
+    regionName === 'м. Київ' ||
+    regionName === ANALYTICS_UNKNOWN_REGION_NAME ||
+    regionName.endsWith(' обл.')
+  ) {
+    return regionName;
+  }
+
+  return `${regionName} обл.`;
+}
+
+export function normalizeAnalyticsRegionSearchTerm(search: string): string {
+  return search
+    .replace(/\s*обл\.?$/iu, '')
+    .trim()
+    .toLowerCase();
+}
+
 export const ANALYTICS_DEFAULT_TABLE_PAGE = 1;
 export const ANALYTICS_DEFAULT_TABLE_LIMIT = 10;
 export const ANALYTICS_DEFAULT_TABLE_SORT_FIELD = 'period' as const;
