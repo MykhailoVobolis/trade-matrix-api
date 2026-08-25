@@ -5,6 +5,8 @@ import {
   ANALYTICS_REGION_DICTIONARY,
   ANALYTICS_UNKNOWN_REGION_CODE,
   ANALYTICS_UNKNOWN_REGION_NAME,
+  formatAnalyticsRegionName,
+  normalizeAnalyticsRegionSearchTerm,
 } from '../overview/constants/overview.constants';
 import type { SuppliersBaseQueryDto } from './dto/suppliers-base-query.dto';
 import type {
@@ -801,10 +803,10 @@ export class SuppliersRepository {
       return null;
     }
 
-    return (
+    return formatAnalyticsRegionName(
       ANALYTICS_REGION_DICTIONARY[
         regionCode as keyof typeof ANALYTICS_REGION_DICTIONARY
-      ] ?? ANALYTICS_UNKNOWN_REGION_NAME
+      ] ?? ANALYTICS_UNKNOWN_REGION_NAME,
     );
   }
 
@@ -1828,21 +1830,25 @@ export class SuppliersRepository {
       return Prisma.sql`TRUE`;
     }
 
-    const matchingCodes = Object.entries(ANALYTICS_REGION_DICTIONARY)
-      .filter(([, label]) => label.toLowerCase().includes(search))
-      .map(([code]) => code);
-    const normalizedSearch = `%${search}%`;
+    const normalizedSearch = normalizeAnalyticsRegionSearchTerm(search);
 
-    if (ANALYTICS_UNKNOWN_REGION_NAME.toLowerCase().includes(search)) {
+    const matchingCodes = Object.entries(ANALYTICS_REGION_DICTIONARY)
+      .filter(([, label]) => label.toLowerCase().includes(normalizedSearch))
+      .map(([code]) => code);
+    const normalizedSearchPattern = `%${normalizedSearch}%`;
+
+    if (
+      ANALYTICS_UNKNOWN_REGION_NAME.toLowerCase().includes(normalizedSearch)
+    ) {
       matchingCodes.push(ANALYTICS_UNKNOWN_REGION_CODE);
     }
 
     if (matchingCodes.length === 0) {
-      return Prisma.sql`LOWER(COALESCE(mapped.region_code, '')) LIKE ${normalizedSearch}`;
+      return Prisma.sql`LOWER(COALESCE(mapped.region_code, '')) LIKE ${normalizedSearchPattern}`;
     }
 
     return Prisma.sql`(
-      LOWER(COALESCE(mapped.region_code, '')) LIKE ${normalizedSearch}
+      LOWER(COALESCE(mapped.region_code, '')) LIKE ${normalizedSearchPattern}
       OR ${this.resolveRegionCodeCaseSql('mapped.region_code')} IN (${Prisma.join(
         matchingCodes,
       )})

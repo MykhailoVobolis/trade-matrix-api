@@ -1,3 +1,4 @@
+import { BuyersModule } from './analytics/buyers/buyers.module';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { OverviewModule } from './analytics/overview/overview.module';
@@ -14,6 +15,7 @@ import { UserModule } from './user/user.module';
     ConfigModule.forRoot({
       isGlobal: true,
     }),
+    BuyersModule,
     OverviewModule,
     SuppliersModule,
     PrismaModule,

@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { utils, write } from 'xlsx';
 import type { AuthenticatedUser } from '../../auth/types/authenticated-user.type';
+import { ANALYTICS_UNKNOWN_REGION_NAME } from '../overview/constants/overview.constants';
 import {
   SUPPLIERS_ANALYTICS_DEFAULT_FILTER_OPTIONS_LIMIT,
   SUPPLIERS_ANALYTICS_DEFAULT_FILTER_OPTIONS_PAGE,
@@ -635,7 +636,7 @@ export class SuppliersService {
 
       return {
         regionCode: item.regionCode,
-        regionName: item.regionName,
+        regionName: this.formatTopRegionName(item.regionName),
         amount: item.amount,
         share: item.share,
         activeBuyers: item.activeBuyers,
@@ -753,7 +754,7 @@ export class SuppliersService {
         type: 'TOP_REGION',
         payload: {
           regionCode: topRegion?.regionCode ?? null,
-          regionName: topRegion?.regionName ?? null,
+          regionName: this.formatTopRegionName(topRegion?.regionName ?? null),
           amount: topRegion?.amount ?? 0,
           share: topRegion?.share ?? 0,
           activeBuyers: topRegionDetails?.activeBuyers ?? 0,
@@ -797,6 +798,25 @@ export class SuppliersService {
     }>,
   ): number {
     return items.reduce((total, item) => total + item.share, 0);
+  }
+
+  private formatTopRegionName(regionName: string | null): string | null {
+    if (!regionName) {
+      return null;
+    }
+
+    if (
+      regionName === 'м. Київ' ||
+      regionName === ANALYTICS_UNKNOWN_REGION_NAME
+    ) {
+      return regionName;
+    }
+
+    if (regionName.endsWith(' обл.')) {
+      return regionName;
+    }
+
+    return `${regionName} обл.`;
   }
 
   private buildEmptyExportFile(
