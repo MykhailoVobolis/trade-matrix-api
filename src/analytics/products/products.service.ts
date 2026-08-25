@@ -33,6 +33,7 @@ import type {
   ProductsAnalyticsMarketStructure,
   ProductsAnalyticsTimeGrain,
   ProductsAnalyticsTopEntity,
+  ProductsAnalyticsTopProduct,
   ProductsAnalyticsTopRegion,
   ProductsAnalyticsTrendPoint,
 } from './types/products.types';
@@ -86,6 +87,7 @@ export class ProductsService {
       this.productsRepository.getMarketStructure(scope),
       this.productsRepository.getTopBuyers(scope),
       this.productsRepository.getTopSuppliers(scope),
+      this.productsRepository.getTopProducts(scope),
       this.productsRepository.getTopRegions(scope),
       comparisonScope
         ? this.productsRepository.getTrendPoints(
@@ -100,6 +102,9 @@ export class ProductsService {
         ? this.productsRepository.getTopSuppliers(comparisonScope)
         : Promise.resolve([]),
       comparisonScope
+        ? this.productsRepository.getTopProducts(comparisonScope)
+        : Promise.resolve([]),
+      comparisonScope
         ? this.productsRepository.getTopRegions(comparisonScope)
         : Promise.resolve([]),
     ]).then(
@@ -110,10 +115,12 @@ export class ProductsService {
         marketStructure,
         topBuyers,
         topSuppliers,
+        topProducts,
         topRegions,
         comparisonTrend,
         previousTopBuyers,
         previousTopSuppliers,
+        previousTopProducts,
         previousTopRegions,
       ]) => {
         const normalizedTopRegions = this.buildTopRegions(
@@ -142,6 +149,7 @@ export class ProductsService {
             topSuppliers,
             previousTopSuppliers,
           ),
+          topProducts: this.buildTopProducts(topProducts, previousTopProducts),
           topRegions: normalizedTopRegions,
           insights: this.buildInsights({
             kpi,
@@ -273,6 +281,37 @@ export class ProductsService {
           limit,
         };
       }
+      case 'products': {
+        const current = await this.productsRepository.getProductRankings(
+          scope,
+          {
+            page,
+            limit,
+          },
+        );
+        const previous = comparisonScope
+          ? await this.productsRepository.getProductRankingComparisonAmounts(
+              comparisonScope,
+              current.items.flatMap((item) =>
+                item.name === null
+                  ? []
+                  : [
+                      {
+                        name: item.name,
+                        uktzed: item.uktzed,
+                      },
+                    ],
+              ),
+            )
+          : [];
+
+        return {
+          items: this.buildTopProducts(current.items, previous),
+          total: current.total,
+          page,
+          limit,
+        };
+      }
       case 'regions': {
         const current = await this.productsRepository.getRegionRankings(scope, {
           page,
@@ -353,6 +392,36 @@ export class ProductsService {
       return {
         id: item.id,
         name: item.name,
+        amount: item.amount,
+        share: item.share,
+        previousAmount: previousItem?.amount ?? null,
+        deltaPercent: this.calculateDeltaPercent(
+          item.amount,
+          previousItem?.amount ?? 0,
+        ),
+      };
+    });
+  }
+
+  private buildTopProducts(
+    current: ProductsAnalyticsTopProduct[],
+    previous: ProductsAnalyticsTopProduct[],
+  ) {
+    const previousByKey = new Map(
+      previous.map((item) => [
+        `${item.name ?? ''}::${item.uktzed ?? ''}`,
+        item,
+      ]),
+    );
+
+    return current.map((item) => {
+      const key = `${item.name ?? ''}::${item.uktzed ?? ''}`;
+      const previousItem = previousByKey.get(key) ?? null;
+
+      return {
+        productId: item.productId,
+        name: item.name,
+        uktzed: item.uktzed,
         amount: item.amount,
         share: item.share,
         previousAmount: previousItem?.amount ?? null,
@@ -717,6 +786,7 @@ export class ProductsService {
       },
       topBuyers: [],
       topSuppliers: [],
+      topProducts: [],
       topRegions: [],
       insights: [],
     };

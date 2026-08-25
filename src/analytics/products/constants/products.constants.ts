@@ -30,6 +30,7 @@ export const PRODUCTS_ANALYTICS_FILTER_OPTION_DIMENSIONS = [
 export const PRODUCTS_ANALYTICS_RANKING_DIMENSIONS = [
   'buyers',
   'suppliers',
+  'products',
   'regions',
 ] as const;
 

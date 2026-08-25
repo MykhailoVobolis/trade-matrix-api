@@ -70,6 +70,29 @@ export class ProductsTopEntityItemDto {
   deltaPercent: number | null;
 }
 
+export class ProductsTopProductItemDto {
+  @ApiPropertyOptional({ example: 'Літол-24', nullable: true })
+  productId: string | null;
+
+  @ApiPropertyOptional({ example: 'Літол-24', nullable: true })
+  name: string | null;
+
+  @ApiPropertyOptional({ example: '2710199900', nullable: true })
+  uktzed: string | null;
+
+  @ApiProperty({ example: 0 })
+  amount: number;
+
+  @ApiProperty({ example: 0 })
+  share: number;
+
+  @ApiPropertyOptional({ example: 0, nullable: true })
+  previousAmount: number | null;
+
+  @ApiPropertyOptional({ example: 0, nullable: true })
+  deltaPercent: number | null;
+}
+
 export class ProductsTopRegionItemDto {
   @ApiPropertyOptional({ example: '15', nullable: true })
   regionCode: string | null;
@@ -181,6 +204,9 @@ export class ProductsResponseDto {
 
   @ApiProperty({ type: ProductsTopEntityItemDto, isArray: true })
   topSuppliers: ProductsTopEntityItemDto[];
+
+  @ApiProperty({ type: ProductsTopProductItemDto, isArray: true })
+  topProducts: ProductsTopProductItemDto[];
 
   @ApiProperty({ type: ProductsTopRegionItemDto, isArray: true })
   topRegions: ProductsTopRegionItemDto[];
