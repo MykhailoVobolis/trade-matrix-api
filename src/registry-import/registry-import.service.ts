@@ -20,8 +20,10 @@ import {
   REGISTRY_IMPORT_MAX_FILE_SIZE_BYTES,
   REGISTRY_IMPORT_MAX_FILES,
   REGISTRY_IMPORT_REQUIRED_HEADERS,
+  REGISTRY_IMPORT_SUPPORTED_EXTENSIONS,
 } from './constants/registry-import.constants';
 import { RegistryImportItemDto } from './dto/registry-import-item.dto';
+import { RegistryImportFileType } from './dto/registry-import-item.dto';
 import { RegistryImportListResponseDto } from './dto/registry-import-list-response.dto';
 import { RegistryImportStatus } from './dto/registry-import-status.dto';
 import { RegistryImportStatsDto } from './dto/registry-import-stats.dto';
@@ -41,6 +43,11 @@ type RegistryImportRecord = {
   createdAt: Date;
   startedAt: Date | null;
   finishedAt: Date | null;
+};
+
+type ParsedWorkbook = {
+  firstSheetName: string | null;
+  rows: (string | number | boolean | null)[][];
 };
 
 type RegistryRecordListItem = {
@@ -80,7 +87,9 @@ export class RegistryImportService {
     files: UploadedRegistryImportFile[],
   ): Promise<RegistryImportItemDto[]> {
     if (files.length === 0) {
-      throw new BadRequestException('At least one XLSX file is required.');
+      throw new BadRequestException(
+        'At least one XLSX or CSV file is required.',
+      );
     }
 
     if (files.length > REGISTRY_IMPORT_MAX_FILES) {
@@ -270,8 +279,14 @@ export class RegistryImportService {
     fileName: string,
     fileSizeBytes: number,
   ): string | null {
-    if (!fileName.toLowerCase().endsWith('.xlsx')) {
-      return 'Only .xlsx files are supported.';
+    const normalizedFileName = fileName.toLowerCase();
+
+    if (
+      !REGISTRY_IMPORT_SUPPORTED_EXTENSIONS.some((extension) =>
+        normalizedFileName.endsWith(extension),
+      )
+    ) {
+      return 'Only .xlsx and .csv files are supported.';
     }
 
     if (fileSizeBytes > REGISTRY_IMPORT_MAX_FILE_SIZE_BYTES) {
@@ -321,31 +336,16 @@ export class RegistryImportService {
     await this.registryImportRepository.markProcessing(importId);
 
     try {
-      const workbook = read(file.buffer, {
-        type: 'buffer',
-        dense: true,
-      });
-      const firstSheetName = workbook.SheetNames[0];
+      const { firstSheetName, rows } = this.parseSpreadsheetRows(file);
 
       if (!firstSheetName) {
         const failedImport = await this.registryImportRepository.markFailed(
           importId,
-          'The workbook does not contain any sheets.',
+          'The spreadsheet does not contain any sheets.',
         );
 
         return this.toRegistryImportItemDto(failedImport);
       }
-
-      const firstSheet = workbook.Sheets[firstSheetName];
-      const rows = utils.sheet_to_json<(string | number | boolean | null)[]>(
-        firstSheet,
-        {
-          header: 1,
-          raw: false,
-          defval: null,
-          blankrows: false,
-        },
-      );
 
       if (rows.length === 0) {
         const failedImport = await this.registryImportRepository.markFailed(
@@ -392,7 +392,7 @@ export class RegistryImportService {
       await this.registryImportRepository.deleteRecordsByImportId(importId);
       const failedImport = await this.registryImportRepository.markFailed(
         importId,
-        'Failed to parse or persist the XLSX file.',
+        'Failed to parse or persist the spreadsheet file.',
       );
 
       return this.toRegistryImportItemDto(failedImport);
@@ -625,7 +625,9 @@ export class RegistryImportService {
       return '';
     }
 
-    return String(value).trim();
+    return String(value)
+      .replace(/^\uFEFF/u, '')
+      .trim();
   }
 
   private toOptionalString(value: string | undefined): string | null {
@@ -962,6 +964,9 @@ export class RegistryImportService {
     return {
       id: importRecord.id,
       fileName: importRecord.originalFileName,
+      fileType: this.resolveRegistryImportFileType(
+        importRecord.originalFileName,
+      ),
       status: this.toDtoStatus(importRecord.status),
       sizeBytes,
       sizeMb: Number((sizeBytes / (1024 * 1024)).toFixed(1)),
@@ -973,6 +978,157 @@ export class RegistryImportService {
       startedAt: importRecord.startedAt,
       finishedAt: importRecord.finishedAt,
     };
+  }
+
+  private parseSpreadsheetRows(
+    file: UploadedRegistryImportFile,
+  ): ParsedWorkbook {
+    const fileType = this.resolveRegistryImportFileType(file.originalname);
+
+    if (fileType === RegistryImportFileType.CSV) {
+      return this.parseCsvRows(file.buffer);
+    }
+
+    const workbook = read(file.buffer, {
+      type: 'buffer',
+      dense: true,
+    });
+    const firstSheetName = workbook.SheetNames[0] ?? null;
+
+    if (!firstSheetName) {
+      return {
+        firstSheetName: null,
+        rows: [],
+      };
+    }
+
+    const firstSheet = workbook.Sheets[firstSheetName];
+    const rows = utils.sheet_to_json<(string | number | boolean | null)[]>(
+      firstSheet,
+      {
+        header: 1,
+        raw: false,
+        defval: null,
+        blankrows: false,
+      },
+    );
+
+    return {
+      firstSheetName,
+      rows,
+    };
+  }
+
+  private parseCsvRows(buffer: Buffer): ParsedWorkbook {
+    const decodedCandidates = [
+      buffer.toString('utf8').replace(/^\uFEFF/u, ''),
+      new TextDecoder('windows-1251').decode(buffer).replace(/^\uFEFF/u, ''),
+    ];
+    const parsedCandidates = decodedCandidates.map((csvText) =>
+      this.parseCsvRowsFromText(csvText),
+    );
+
+    return parsedCandidates.reduce((best, candidate) =>
+      this.getHeaderMatchScore(candidate.rows) >
+      this.getHeaderMatchScore(best.rows)
+        ? candidate
+        : best,
+    );
+  }
+
+  private parseCsvRowsFromText(csvText: string): ParsedWorkbook {
+    const delimiter = this.detectCsvDelimiter(csvText);
+    const workbook = read(csvText, {
+      type: 'string',
+      dense: true,
+      FS: delimiter,
+      // Preserve CSV cells exactly as provided. Letting xlsx coerce values here
+      // rewrites dd.mm.yyyy dates into locale-like m/d/yy strings.
+      raw: true,
+      codepage: 65001,
+    });
+    const firstSheetName = workbook.SheetNames[0] ?? null;
+
+    if (!firstSheetName) {
+      return {
+        firstSheetName: null,
+        rows: [],
+      };
+    }
+
+    const firstSheet = workbook.Sheets[firstSheetName];
+    const rows = utils.sheet_to_json<(string | number | boolean | null)[]>(
+      firstSheet,
+      {
+        header: 1,
+        raw: true,
+        defval: null,
+        blankrows: false,
+      },
+    );
+
+    return {
+      firstSheetName,
+      rows,
+    };
+  }
+
+  private getHeaderMatchScore(
+    rows: (string | number | boolean | null)[][],
+  ): number {
+    const headerRow =
+      rows[0]?.map((value) => this.normalizeCellValue(value)) ?? [];
+    const headerCounts = new Map<string, number>();
+
+    for (const header of headerRow) {
+      if (!header) {
+        continue;
+      }
+
+      headerCounts.set(header, (headerCounts.get(header) ?? 0) + 1);
+    }
+
+    let score = 0;
+
+    for (const columnSpec of REGISTRY_IMPORT_COLUMN_SPECS) {
+      const occurrences = headerCounts.get(columnSpec.header) ?? 0;
+
+      if (occurrences >= columnSpec.occurrence) {
+        score += 1;
+      }
+    }
+
+    return score;
+  }
+
+  private detectCsvDelimiter(csvText: string): string {
+    const firstNonEmptyLine =
+      csvText
+        .split(/\r?\n/u)
+        .map((line) => line.trim())
+        .find((line) => line.length > 0) ?? '';
+    const candidates = [';', ',', '\t'] as const;
+    let bestDelimiter = ';';
+    let bestScore = -1;
+
+    for (const candidate of candidates) {
+      const score = firstNonEmptyLine.split(candidate).length;
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestDelimiter = candidate;
+      }
+    }
+
+    return bestDelimiter;
+  }
+
+  private resolveRegistryImportFileType(
+    fileName: string,
+  ): RegistryImportFileType {
+    return fileName.toLowerCase().endsWith('.csv')
+      ? RegistryImportFileType.CSV
+      : RegistryImportFileType.XLSX;
   }
 
   private toDtoStatus(

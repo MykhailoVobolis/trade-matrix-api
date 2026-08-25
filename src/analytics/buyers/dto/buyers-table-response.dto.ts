@@ -5,10 +5,10 @@ export class BuyersTableItemDto {
   period: string;
 
   @ApiPropertyOptional({ example: '15', nullable: true })
-  supplierRegionCode: string | null;
+  buyerRegionCode: string | null;
 
   @ApiPropertyOptional({ example: 'Одеська обл.', nullable: true })
-  supplierRegionName: string | null;
+  buyerRegionName: string | null;
 
   @ApiPropertyOptional({ example: '40075815', nullable: true })
   buyerTaxNumber: string | null;

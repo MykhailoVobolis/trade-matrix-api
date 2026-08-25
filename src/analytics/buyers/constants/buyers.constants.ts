@@ -15,7 +15,7 @@ export const BUYERS_ANALYTICS_FILTER_OPTION_DIMENSIONS = [
   'suppliers',
   'products',
   'uktzed',
-  'supplierRegions',
+  'buyerRegions',
 ] as const;
 
 export const BUYERS_ANALYTICS_RANKING_DIMENSIONS = [
@@ -26,7 +26,7 @@ export const BUYERS_ANALYTICS_RANKING_DIMENSIONS = [
 
 export const BUYERS_ANALYTICS_TABLE_SORT_FIELDS = [
   'period',
-  'supplierRegion',
+  'buyerRegion',
   'buyer',
   'supplier',
   'product',

@@ -1,12 +1,23 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { RegistryImportStatus } from './registry-import-status.dto';
 
+export enum RegistryImportFileType {
+  XLSX = 'XLSX',
+  CSV = 'CSV',
+}
+
 export class RegistryImportItemDto {
   @ApiProperty({ example: 'cm0registryimport123' })
   id: string;
 
   @ApiProperty({ example: '42794130-ПЗ.xlsx' })
   fileName: string;
+
+  @ApiProperty({
+    example: RegistryImportFileType.XLSX,
+    enum: RegistryImportFileType,
+  })
+  fileType: RegistryImportFileType;
 
   @ApiProperty({
     example: 'completed',

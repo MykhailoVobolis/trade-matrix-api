@@ -45,9 +45,7 @@ export class BuyersRepository {
       filters: {
         buyerTaxNumbers: this.normalizeTaxNumbers(query.buyerTaxNumbers),
         supplierTaxNumbers: this.normalizeTaxNumbers(query.supplierTaxNumbers),
-        supplierRegionCodes: this.normalizeRegionCodes(
-          query.supplierRegionCodes,
-        ),
+        buyerRegionCodes: this.normalizeRegionCodes(query.buyerRegionCodes),
         uktzedValues: this.normalizeUktzedValues(query.uktzed),
         products: this.normalizePreservedStringValues(query.products),
       },
@@ -94,9 +92,9 @@ export class BuyersRepository {
       };
     }
 
-    if (scope.filters.supplierRegionCodes.length > 0) {
-      where.sellerRegionCode = {
-        in: scope.filters.supplierRegionCodes,
+    if (scope.filters.buyerRegionCodes.length > 0) {
+      where.buyerRegionCode = {
+        in: scope.filters.buyerRegionCodes,
       };
     }
 
@@ -128,7 +126,7 @@ export class BuyersRepository {
       Array<{
         purchasesWithVat: Prisma.Decimal | null;
         activeSuppliers: bigint | number;
-        supplierRegions: bigint | number;
+        buyerRegions: bigint | number;
         productPositions: bigint | number;
       }>
     >(Prisma.sql`
@@ -151,12 +149,12 @@ export class BuyersRepository {
         COUNT(
           DISTINCT CASE
             WHEN ${buyerIdentitySql} IS NOT NULL
-             AND record."seller_region_code" IS NOT NULL
-             AND BTRIM(record."seller_region_code") <> ''
-            THEN ${this.buildResolvedRegionGroupSql('record."seller_region_code"')}
+             AND record."buyer_region_code" IS NOT NULL
+             AND BTRIM(record."buyer_region_code") <> ''
+            THEN ${this.buildResolvedRegionGroupSql('record."buyer_region_code"')}
             ELSE NULL
           END
-        ) AS "supplierRegions",
+        ) AS "buyerRegions",
         COUNT(
           DISTINCT CASE
             WHEN ${buyerIdentitySql} IS NOT NULL THEN ${productIdentitySql}
@@ -170,7 +168,7 @@ export class BuyersRepository {
     return {
       purchasesWithVat: Number(row?.purchasesWithVat ?? 0),
       activeSuppliers: Number(row?.activeSuppliers ?? 0),
-      supplierRegions: Number(row?.supplierRegions ?? 0),
+      buyerRegions: Number(row?.buyerRegions ?? 0),
       productPositions: Number(row?.productPositions ?? 0),
     };
   }
@@ -243,17 +241,17 @@ export class BuyersRepository {
   async getMarketStructure(
     scope: BuyersAnalyticsBaseScope,
   ): Promise<BuyersAnalyticsMarketStructure> {
-    const [topSupplier, topSupplierRegion, topUKTZED, top5SuppliersShare] =
+    const [topSupplier, topBuyerRegion, topUKTZED, top5SuppliersShare] =
       await Promise.all([
         this.getTopSupplier(scope),
-        this.getTopSupplierRegion(scope),
+        this.getTopBuyerRegion(scope),
         this.getTopUktzed(scope),
         this.getTopGroupShare(scope, 5),
       ]);
 
     return {
       topSupplier,
-      topSupplierRegion,
+      topBuyerRegion,
       topUKTZED,
       top5SuppliersShare,
     };
@@ -327,7 +325,7 @@ export class BuyersRepository {
     }));
   }
 
-  async getTopSupplierRegions(
+  async getTopBuyerRegions(
     scope: BuyersAnalyticsBaseScope,
     limit = 5,
   ): Promise<BuyersAnalyticsTopRegion[]> {
@@ -352,14 +350,14 @@ export class BuyersRepository {
     >(Prisma.sql`
       WITH grouped AS (
         SELECT
-          ${this.buildResolvedRegionGroupSql('record."seller_region_code"')} AS region_code,
+          ${this.buildResolvedRegionGroupSql('record."buyer_region_code"')} AS region_code,
           SUM(${amountWithVatSql}) AS amount,
           COUNT(DISTINCT ${supplierIdentitySql}) AS active_suppliers
         FROM "RegistryRecord" AS record
         WHERE ${whereSql}
           AND ${buyerIdentitySql} IS NOT NULL
           AND ${supplierIdentitySql} IS NOT NULL
-          AND ${this.buildResolvedRegionGroupSql('record."seller_region_code"')} IS NOT NULL
+          AND ${this.buildResolvedRegionGroupSql('record."buyer_region_code"')} IS NOT NULL
         GROUP BY 1
       ),
       totals AS (
@@ -486,7 +484,7 @@ export class BuyersRepository {
     }));
   }
 
-  async getSupplierRegionRankings(
+  async getBuyerRegionRankings(
     scope: BuyersAnalyticsBaseScope,
     options: { page: number; limit: number },
   ): Promise<BuyersAnalyticsRankingResult<BuyersAnalyticsTopRegion>> {
@@ -498,7 +496,7 @@ export class BuyersRepository {
         activeSuppliers: bigint | number;
         totalCount: bigint | number;
       }>
-    >(this.buildSupplierRegionRankingsQuery(scope, options));
+    >(this.buildBuyerRegionRankingsQuery(scope, options));
 
     return {
       items: rows.map((row) => ({
@@ -512,7 +510,7 @@ export class BuyersRepository {
     };
   }
 
-  async getSupplierRegionRankingComparisonAmounts(
+  async getBuyerRegionRankingComparisonAmounts(
     scope: BuyersAnalyticsBaseScope,
     regionCodes: string[],
   ): Promise<BuyersAnalyticsTopRegion[]> {
@@ -527,7 +525,7 @@ export class BuyersRepository {
         share: Prisma.Decimal | null;
         activeSuppliers: bigint | number;
       }>
-    >(this.buildSupplierRegionComparisonAmountsQuery(scope, regionCodes));
+    >(this.buildBuyerRegionComparisonAmountsQuery(scope, regionCodes));
 
     return rows.map((row) => ({
       regionCode: this.resolveRegionCode(row.regionCode),
@@ -573,7 +571,7 @@ export class BuyersRepository {
     const rows = await this.prisma.$queryRaw<
       Array<{
         periodStart: Date;
-        supplierRegionCode: string | null;
+        buyerRegionCode: string | null;
         buyerTaxNumber: string | null;
         buyerName: string | null;
         supplierTaxNumber: string | null;
@@ -590,11 +588,11 @@ export class BuyersRepository {
       WITH grouped AS (
         SELECT
           ${bucketExpressionSql} AS period_start,
-          ${this.buildResolvedRegionGroupSql('record."seller_region_code"')} AS supplier_region_code,
+          ${this.buildResolvedRegionGroupSql('record."buyer_region_code"')} AS buyer_region_code,
           ${buyerIdentitySql} AS buyer_tax_number,
-          MIN(NULLIF(BTRIM(record."buyer_name"), '')) AS buyer_name,
+          MODE() WITHIN GROUP (ORDER BY NULLIF(BTRIM(record."buyer_name"), '')) AS buyer_name,
           ${supplierIdentitySql} AS supplier_tax_number,
-          MIN(NULLIF(BTRIM(record."seller_name"), '')) AS supplier_name,
+          MODE() WITHIN GROUP (ORDER BY NULLIF(BTRIM(record."seller_name"), '')) AS supplier_name,
           NULLIF(${outputProductSql}, '') AS product,
           NULLIF(${outputUktzedSql}, '') AS uktzed,
           NULLIF(${normalizedUnitSql}, '') AS unit,
@@ -618,7 +616,7 @@ export class BuyersRepository {
       )
       SELECT
         grouped.period_start AS "periodStart",
-        grouped.supplier_region_code AS "supplierRegionCode",
+        grouped.buyer_region_code AS "buyerRegionCode",
         grouped.buyer_tax_number AS "buyerTaxNumber",
         grouped.buyer_name AS "buyerName",
         grouped.supplier_tax_number AS "supplierTaxNumber",
@@ -679,7 +677,7 @@ export class BuyersRepository {
     const rows = await this.prisma.$queryRaw<
       Array<{
         periodStart: Date;
-        supplierRegionCode: string | null;
+        buyerRegionCode: string | null;
         buyerTaxNumber: string | null;
         buyerName: string | null;
         supplierTaxNumber: string | null;
@@ -695,11 +693,11 @@ export class BuyersRepository {
       WITH grouped AS (
         SELECT
           ${bucketExpressionSql} AS period_start,
-          ${this.buildResolvedRegionGroupSql('record."seller_region_code"')} AS supplier_region_code,
+          ${this.buildResolvedRegionGroupSql('record."buyer_region_code"')} AS buyer_region_code,
           ${buyerIdentitySql} AS buyer_tax_number,
-          MIN(NULLIF(BTRIM(record."buyer_name"), '')) AS buyer_name,
+          MODE() WITHIN GROUP (ORDER BY NULLIF(BTRIM(record."buyer_name"), '')) AS buyer_name,
           ${supplierIdentitySql} AS supplier_tax_number,
-          MIN(NULLIF(BTRIM(record."seller_name"), '')) AS supplier_name,
+          MODE() WITHIN GROUP (ORDER BY NULLIF(BTRIM(record."seller_name"), '')) AS supplier_name,
           NULLIF(${outputProductSql}, '') AS product,
           NULLIF(${outputUktzedSql}, '') AS uktzed,
           NULLIF(${normalizedUnitSql}, '') AS unit,
@@ -723,7 +721,7 @@ export class BuyersRepository {
       )
       SELECT
         grouped.period_start AS "periodStart",
-        grouped.supplier_region_code AS "supplierRegionCode",
+        grouped.buyer_region_code AS "buyerRegionCode",
         grouped.buyer_tax_number AS "buyerTaxNumber",
         grouped.buyer_name AS "buyerName",
         grouped.supplier_tax_number AS "supplierTaxNumber",
@@ -779,8 +777,8 @@ export class BuyersRepository {
         return this.getProductFilterOptions(scope, options);
       case 'uktzed':
         return this.getUktzedFilterOptions(scope, options);
-      case 'supplierRegions':
-        return this.getSupplierRegionFilterOptions(scope, options);
+      case 'buyerRegions':
+        return this.getBuyerRegionFilterOptions(scope, options);
     }
   }
 
@@ -861,7 +859,7 @@ export class BuyersRepository {
       WITH grouped AS (
         SELECT
           ${identitySql} AS value,
-          MIN(NULLIF(BTRIM(${Prisma.raw(nameColumn)}), '')) AS label
+          MODE() WITHIN GROUP (ORDER BY NULLIF(BTRIM(${Prisma.raw(nameColumn)}), '')) AS label
         FROM "RegistryRecord" AS record
         WHERE ${whereSql}
           AND ${identitySql} IS NOT NULL
@@ -1047,7 +1045,7 @@ export class BuyersRepository {
     };
   }
 
-  private async getSupplierRegionFilterOptions(
+  private async getBuyerRegionFilterOptions(
     scope: BuyersAnalyticsBaseScope,
     options: {
       search?: string;
@@ -1069,10 +1067,10 @@ export class BuyersRepository {
       }>
     >(Prisma.sql`
       WITH grouped AS (
-        SELECT DISTINCT ${this.buildResolvedRegionGroupSql('record."seller_region_code"')} AS region_code
+        SELECT DISTINCT ${this.buildResolvedRegionGroupSql('record."buyer_region_code"')} AS region_code
         FROM "RegistryRecord" AS record
         WHERE ${whereSql}
-          AND ${this.buildResolvedRegionGroupSql('record."seller_region_code"')} IS NOT NULL
+          AND ${this.buildResolvedRegionGroupSql('record."buyer_region_code"')} IS NOT NULL
       ),
       mapped AS (
         SELECT grouped.region_code AS region_code
@@ -1137,7 +1135,7 @@ export class BuyersRepository {
     return this.toMarketEntity(row);
   }
 
-  private async getTopSupplierRegion(
+  private async getTopBuyerRegion(
     scope: BuyersAnalyticsBaseScope,
   ): Promise<BuyersAnalyticsMarketRegion | null> {
     const amountWithVatSql = this.amountWithVatSql();
@@ -1161,14 +1159,14 @@ export class BuyersRepository {
     >(Prisma.sql`
       WITH grouped AS (
         SELECT
-          ${this.buildResolvedRegionGroupSql('record."seller_region_code"')} AS region_code,
+          ${this.buildResolvedRegionGroupSql('record."buyer_region_code"')} AS region_code,
           SUM(${amountWithVatSql}) AS amount,
           COUNT(DISTINCT ${supplierIdentitySql}) AS active_suppliers
         FROM "RegistryRecord" AS record
         WHERE ${whereSql}
           AND ${buyerIdentitySql} IS NOT NULL
           AND ${supplierIdentitySql} IS NOT NULL
-          AND ${this.buildResolvedRegionGroupSql('record."seller_region_code"')} IS NOT NULL
+          AND ${this.buildResolvedRegionGroupSql('record."buyer_region_code"')} IS NOT NULL
         GROUP BY 1
       ),
       totals AS (
@@ -1349,7 +1347,7 @@ export class BuyersRepository {
       WITH grouped AS (
         SELECT
           ${supplierIdentitySql} AS id,
-          MIN(NULLIF(BTRIM(record."seller_name"), '')) AS name,
+          MODE() WITHIN GROUP (ORDER BY NULLIF(BTRIM(record."seller_name"), '')) AS name,
           SUM(${amountWithVatSql}) AS amount
         FROM "RegistryRecord" AS record
         WHERE ${whereSql}
@@ -1399,7 +1397,7 @@ export class BuyersRepository {
       WITH grouped AS (
         SELECT
           ${supplierIdentitySql} AS id,
-          MIN(NULLIF(BTRIM(record."seller_name"), '')) AS name,
+          MODE() WITHIN GROUP (ORDER BY NULLIF(BTRIM(record."seller_name"), '')) AS name,
           SUM(${amountWithVatSql}) AS amount
         FROM "RegistryRecord" AS record
         WHERE ${whereSql}
@@ -1536,7 +1534,7 @@ export class BuyersRepository {
     `;
   }
 
-  private buildSupplierRegionRankingsQuery(
+  private buildBuyerRegionRankingsQuery(
     scope: BuyersAnalyticsBaseScope,
     options: { page: number; limit: number },
   ): Prisma.Sql {
@@ -1551,7 +1549,7 @@ export class BuyersRepository {
     );
     const amountWithVatSql = this.amountWithVatSql();
     const regionSql = this.buildResolvedRegionGroupSql(
-      'record."seller_region_code"',
+      'record."buyer_region_code"',
     );
     const whereSql = this.buildBaseScopeSql(scope);
 
@@ -1591,7 +1589,7 @@ export class BuyersRepository {
     `;
   }
 
-  private buildSupplierRegionComparisonAmountsQuery(
+  private buildBuyerRegionComparisonAmountsQuery(
     scope: BuyersAnalyticsBaseScope,
     regionCodes: string[],
   ): Prisma.Sql {
@@ -1605,7 +1603,7 @@ export class BuyersRepository {
     );
     const amountWithVatSql = this.amountWithVatSql();
     const regionSql = this.buildResolvedRegionGroupSql(
-      'record."seller_region_code"',
+      'record."buyer_region_code"',
     );
     const whereSql = this.buildBaseScopeSql(scope);
 
@@ -1659,7 +1657,7 @@ export class BuyersRepository {
       WITH grouped AS (
         SELECT
           ${supplierIdentitySql} AS id,
-          MIN(NULLIF(BTRIM(record."seller_name"), '')) AS name,
+          MODE() WITHIN GROUP (ORDER BY NULLIF(BTRIM(record."seller_name"), '')) AS name,
           SUM(${amountWithVatSql}) AS amount
         FROM "RegistryRecord" AS record
         WHERE ${whereSql}
@@ -1709,7 +1707,7 @@ export class BuyersRepository {
 
   private mapBuyersTableRow(row: {
     periodStart: Date;
-    supplierRegionCode: string | null;
+    buyerRegionCode: string | null;
     buyerTaxNumber: string | null;
     buyerName: string | null;
     supplierTaxNumber: string | null;
@@ -1723,7 +1721,7 @@ export class BuyersRepository {
   }): BuyersAnalyticsTableItem {
     return {
       periodStart: row.periodStart,
-      supplierRegionCode: this.resolveRegionCode(row.supplierRegionCode),
+      buyerRegionCode: this.resolveRegionCode(row.buyerRegionCode),
       buyerTaxNumber: row.buyerTaxNumber,
       buyerName: row.buyerName,
       supplierTaxNumber: row.supplierTaxNumber,
@@ -1747,8 +1745,8 @@ export class BuyersRepository {
     switch (sortBy) {
       case 'period':
         return Prisma.sql`grouped.period_start ${directionSql}, grouped.buyer_tax_number ASC NULLS LAST`;
-      case 'supplierRegion':
-        return Prisma.sql`grouped.supplier_region_code ${directionSql} NULLS LAST, grouped.period_start DESC`;
+      case 'buyerRegion':
+        return Prisma.sql`grouped.buyer_region_code ${directionSql} NULLS LAST, grouped.period_start DESC`;
       case 'buyer':
         return Prisma.sql`grouped.buyer_name ${directionSql} NULLS LAST, grouped.buyer_tax_number ${directionSql} NULLS LAST`;
       case 'supplier':
@@ -1814,11 +1812,11 @@ export class BuyersRepository {
       );
     }
 
-    if (scope.filters.supplierRegionCodes.length > 0) {
+    if (scope.filters.buyerRegionCodes.length > 0) {
       conditions.push(
         this.buildSqlEqualsAnyCondition(
-          this.buildResolvedRegionGroupSql('record."seller_region_code"'),
-          scope.filters.supplierRegionCodes,
+          this.buildResolvedRegionGroupSql('record."buyer_region_code"'),
+          scope.filters.buyerRegionCodes,
         ),
       );
     }

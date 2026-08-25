@@ -175,7 +175,7 @@ export class BuyersMarketStructureDto {
   topSupplier: BuyersMarketEntityDto | null;
 
   @ApiPropertyOptional({ type: BuyersMarketRegionDto, nullable: true })
-  topSupplierRegion: BuyersMarketRegionDto | null;
+  topBuyerRegion: BuyersMarketRegionDto | null;
 
   @ApiPropertyOptional({ type: BuyersMarketUktzedDto, nullable: true })
   topUKTZED: BuyersMarketUktzedDto | null;
@@ -229,7 +229,7 @@ export class BuyersResponseDto {
   topProducts: BuyersTopProductItemDto[];
 
   @ApiProperty({ type: BuyersTopRegionItemDto, isArray: true })
-  topSupplierRegions: BuyersTopRegionItemDto[];
+  topBuyerRegions: BuyersTopRegionItemDto[];
 
   @ApiProperty({ type: BuyersInsightDto, isArray: true })
   insights: BuyersInsightDto[];

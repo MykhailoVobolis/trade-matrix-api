@@ -75,7 +75,7 @@ export class BuyersBaseQueryDto {
   @Transform(transformStringArray)
   @IsArray()
   @IsString({ each: true })
-  supplierRegionCodes?: string[];
+  buyerRegionCodes?: string[];
 
   @ApiPropertyOptional({
     type: [String],
