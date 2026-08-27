@@ -589,10 +589,10 @@ export class SuppliersRepository {
         SELECT
           ${bucketExpressionSql} AS period_start,
           ${supplierIdentitySql} AS supplier_tax_number,
-          MIN(NULLIF(BTRIM(record."seller_name"), '')) AS supplier_name,
+          MODE() WITHIN GROUP (ORDER BY NULLIF(BTRIM(record."seller_name"), '')) AS supplier_name,
           ${this.buildResolvedRegionGroupSql('record."buyer_region_code"')} AS buyer_region_code,
           ${buyerIdentitySql} AS buyer_tax_number,
-          MIN(NULLIF(BTRIM(record."buyer_name"), '')) AS buyer_name,
+          MODE() WITHIN GROUP (ORDER BY NULLIF(BTRIM(record."buyer_name"), '')) AS buyer_name,
           NULLIF(${outputProductSql}, '') AS product,
           NULLIF(${outputUktzedSql}, '') AS uktzed,
           NULLIF(${normalizedUnitSql}, '') AS unit,
@@ -694,10 +694,10 @@ export class SuppliersRepository {
         SELECT
           ${bucketExpressionSql} AS period_start,
           ${supplierIdentitySql} AS supplier_tax_number,
-          MIN(NULLIF(BTRIM(record."seller_name"), '')) AS supplier_name,
+          MODE() WITHIN GROUP (ORDER BY NULLIF(BTRIM(record."seller_name"), '')) AS supplier_name,
           ${this.buildResolvedRegionGroupSql('record."buyer_region_code"')} AS buyer_region_code,
           ${buyerIdentitySql} AS buyer_tax_number,
-          MIN(NULLIF(BTRIM(record."buyer_name"), '')) AS buyer_name,
+          MODE() WITHIN GROUP (ORDER BY NULLIF(BTRIM(record."buyer_name"), '')) AS buyer_name,
           NULLIF(${outputProductSql}, '') AS product,
           NULLIF(${outputUktzedSql}, '') AS uktzed,
           NULLIF(${normalizedUnitSql}, '') AS unit,
@@ -853,7 +853,7 @@ export class SuppliersRepository {
       WITH grouped AS (
         SELECT
           ${identitySql} AS value,
-          MIN(NULLIF(BTRIM(${Prisma.raw(nameColumn)}), '')) AS label
+          MODE() WITHIN GROUP (ORDER BY NULLIF(BTRIM(${Prisma.raw(nameColumn)}), '')) AS label
         FROM "RegistryRecord" AS record
         WHERE ${whereSql}
           AND ${identitySql} IS NOT NULL
@@ -1332,7 +1332,7 @@ export class SuppliersRepository {
       WITH grouped AS (
         SELECT
           ${buyerIdentitySql} AS id,
-          MIN(NULLIF(BTRIM(record."buyer_name"), '')) AS name,
+          MODE() WITHIN GROUP (ORDER BY NULLIF(BTRIM(record."buyer_name"), '')) AS name,
           SUM(${amountWithVatSql}) AS amount
         FROM "RegistryRecord" AS record
         WHERE ${whereSql}
@@ -1382,7 +1382,7 @@ export class SuppliersRepository {
       WITH grouped AS (
         SELECT
           ${buyerIdentitySql} AS id,
-          MIN(NULLIF(BTRIM(record."buyer_name"), '')) AS name,
+          MODE() WITHIN GROUP (ORDER BY NULLIF(BTRIM(record."buyer_name"), '')) AS name,
           SUM(${amountWithVatSql}) AS amount
         FROM "RegistryRecord" AS record
         WHERE ${whereSql}
@@ -1642,7 +1642,7 @@ export class SuppliersRepository {
       WITH grouped AS (
         SELECT
           ${buyerIdentitySql} AS id,
-          MIN(NULLIF(BTRIM(record."buyer_name"), '')) AS name,
+          MODE() WITHIN GROUP (ORDER BY NULLIF(BTRIM(record."buyer_name"), '')) AS name,
           SUM(${amountWithVatSql}) AS amount
         FROM "RegistryRecord" AS record
         WHERE ${whereSql}

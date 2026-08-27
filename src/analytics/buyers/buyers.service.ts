@@ -77,7 +77,7 @@ export class BuyersService {
       this.buyersRepository.getMarketStructure(scope),
       this.buyersRepository.getTopSuppliers(scope),
       this.buyersRepository.getTopProducts(scope),
-      this.buyersRepository.getTopSupplierRegions(scope),
+      this.buyersRepository.getTopBuyerRegions(scope),
       comparisonScope
         ? this.buyersRepository.getTrendPoints(
             comparisonScope,
@@ -91,7 +91,7 @@ export class BuyersService {
         ? this.buyersRepository.getTopProducts(comparisonScope)
         : Promise.resolve([]),
       comparisonScope
-        ? this.buyersRepository.getTopSupplierRegions(comparisonScope)
+        ? this.buyersRepository.getTopBuyerRegions(comparisonScope)
         : Promise.resolve([]),
     ]).then(
       ([
@@ -101,11 +101,11 @@ export class BuyersService {
         marketStructure,
         topSuppliers,
         topProducts,
-        topSupplierRegions,
+        topBuyerRegions,
         comparisonTrend,
         previousTopSuppliers,
         previousTopProducts,
-        previousTopSupplierRegions,
+        previousTopBuyerRegions,
       ]) => ({
         period: this.toPeriod(resolved),
         comparison: this.toComparison(resolved),
@@ -118,13 +118,13 @@ export class BuyersService {
         marketStructure: {
           ...marketStructure,
           top5ProductsShare: this.sumTopShares(topProducts),
-          top5SupplierRegionsShare: this.sumTopShares(topSupplierRegions),
+          top5SupplierRegionsShare: this.sumTopShares(topBuyerRegions),
         },
         topSuppliers: this.buildTopEntities(topSuppliers, previousTopSuppliers),
         topProducts: this.buildTopProducts(topProducts, previousTopProducts),
-        topSupplierRegions: this.buildTopRegions(
-          topSupplierRegions,
-          previousTopSupplierRegions,
+        topBuyerRegions: this.buildTopRegions(
+          topBuyerRegions,
+          previousTopBuyerRegions,
         ),
         insights: this.buildInsights({
           kpi: this.buildKpi(currentKpi, previousKpi),
@@ -136,11 +136,11 @@ export class BuyersService {
           marketStructure: {
             ...marketStructure,
             top5ProductsShare: this.sumTopShares(topProducts),
-            top5SupplierRegionsShare: this.sumTopShares(topSupplierRegions),
+            top5SupplierRegionsShare: this.sumTopShares(topBuyerRegions),
           },
-          topSupplierRegions: this.buildTopRegions(
-            topSupplierRegions,
-            previousTopSupplierRegions,
+          topBuyerRegions: this.buildTopRegions(
+            topBuyerRegions,
+            previousTopBuyerRegions,
           ),
         }),
       }),
@@ -179,9 +179,9 @@ export class BuyersService {
       .then((result) => ({
         items: result.items.map((item) => ({
           period: this.formatTablePeriod(item.periodStart, resolved.timeGrain),
-          supplierRegionCode: item.supplierRegionCode,
-          supplierRegionName: this.buyersRepository.resolveRegionName(
-            item.supplierRegionCode,
+          buyerRegionCode: item.buyerRegionCode,
+          buyerRegionName: this.buyersRepository.resolveRegionName(
+            item.buyerRegionCode,
           ),
           buyerTaxNumber: item.buyerTaxNumber,
           buyerName: item.buyerName,
@@ -273,7 +273,7 @@ export class BuyersService {
         };
       }
       case 'regions': {
-        const current = await this.buyersRepository.getSupplierRegionRankings(
+        const current = await this.buyersRepository.getBuyerRegionRankings(
           scope,
           {
             page,
@@ -281,7 +281,7 @@ export class BuyersService {
           },
         );
         const previous = comparisonScope
-          ? await this.buyersRepository.getSupplierRegionRankingComparisonAmounts(
+          ? await this.buyersRepository.getBuyerRegionRankingComparisonAmounts(
               comparisonScope,
               current.items
                 .map((item) => item.regionCode)
@@ -359,9 +359,9 @@ export class BuyersService {
       .then((items) => {
         const rows = items.map((item) => ({
           Period: this.formatTablePeriod(item.periodStart, resolved.timeGrain),
-          'Supplier Region Code': item.supplierRegionCode,
-          'Supplier Region Name': this.buyersRepository.resolveRegionName(
-            item.supplierRegionCode,
+          'Buyer Region Code': item.buyerRegionCode,
+          'Buyer Region Name': this.buyersRepository.resolveRegionName(
+            item.buyerRegionCode,
           ),
           'Buyer Tax Number': item.buyerTaxNumber,
           'Buyer Name': item.buyerName,
@@ -383,8 +383,8 @@ export class BuyersService {
               : utils.aoa_to_sheet([
                   [
                     'Period',
-                    'Supplier Region Code',
-                    'Supplier Region Name',
+                    'Buyer Region Code',
+                    'Buyer Region Name',
                     'Buyer Tax Number',
                     'Buyer Name',
                     'Supplier Tax Number',
@@ -417,8 +417,8 @@ export class BuyersService {
             : utils.aoa_to_sheet([
                 [
                   'Period',
-                  'Supplier Region Code',
-                  'Supplier Region Name',
+                  'Buyer Region Code',
+                  'Buyer Region Name',
                   'Buyer Tax Number',
                   'Buyer Name',
                   'Supplier Tax Number',
@@ -467,13 +467,13 @@ export class BuyersService {
       kpi: {
         purchasesWithVat: this.buildEmptyMetric(),
         activeSuppliers: this.buildEmptyMetric(),
-        supplierRegions: this.buildEmptyMetric(),
+        buyerRegions: this.buildEmptyMetric(),
         productPositions: this.buildEmptyMetric(),
       },
       trend: [],
       marketStructure: {
         topSupplier: null,
-        topSupplierRegion: null,
+        topBuyerRegion: null,
         topUKTZED: null,
         top5SuppliersShare: null,
         top5ProductsShare: null,
@@ -481,7 +481,7 @@ export class BuyersService {
       },
       topSuppliers: [],
       topProducts: [],
-      topSupplierRegions: [],
+      topBuyerRegions: [],
       insights: [],
     };
   }
@@ -490,13 +490,13 @@ export class BuyersService {
     current: {
       purchasesWithVat: number;
       activeSuppliers: number;
-      supplierRegions: number;
+      buyerRegions: number;
       productPositions: number;
     },
     previous: {
       purchasesWithVat: number;
       activeSuppliers: number;
-      supplierRegions: number;
+      buyerRegions: number;
       productPositions: number;
     } | null,
   ) {
@@ -509,9 +509,9 @@ export class BuyersService {
         current.activeSuppliers,
         previous?.activeSuppliers ?? null,
       ),
-      supplierRegions: this.buildMetric(
-        current.supplierRegions,
-        previous?.supplierRegions ?? null,
+      buyerRegions: this.buildMetric(
+        current.buyerRegions,
+        previous?.buyerRegions ?? null,
       ),
       productPositions: this.buildMetric(
         current.productPositions,
@@ -685,7 +685,7 @@ export class BuyersService {
         amount: number;
         share: number;
       } | null;
-      topSupplierRegion: {
+      topBuyerRegion: {
         regionCode: string | null;
         regionName: string | null;
         amount: number;
@@ -703,7 +703,7 @@ export class BuyersService {
       top5ProductsShare: number | null;
       top5SupplierRegionsShare: number | null;
     };
-    topSupplierRegions: Array<{
+    topBuyerRegions: Array<{
       regionCode: string | null;
       regionName: string | null;
       amount: number;
@@ -715,11 +715,9 @@ export class BuyersService {
   }) {
     const peakPurchasesPeriod = this.getPeakPurchasesPeriod(input.trend);
     const topRegion =
-      input.marketStructure.topSupplierRegion ??
-      input.topSupplierRegions[0] ??
-      null;
+      input.marketStructure.topBuyerRegion ?? input.topBuyerRegions[0] ?? null;
     const topRegionDetails = topRegion
-      ? (input.topSupplierRegions.find(
+      ? (input.topBuyerRegions.find(
           (item) => item.regionCode === topRegion.regionCode,
         ) ?? null)
       : null;
@@ -739,7 +737,7 @@ export class BuyersService {
         },
       },
       {
-        type: 'TOP_SUPPLIER_REGION',
+        type: 'TOP_BUYER_REGION',
         payload: {
           regionCode: topRegion?.regionCode ?? null,
           regionName: this.formatTopRegionName(topRegion?.regionName ?? null),
@@ -816,8 +814,8 @@ export class BuyersService {
       const worksheet = utils.aoa_to_sheet([
         [
           'Period',
-          'Supplier Region Code',
-          'Supplier Region Name',
+          'Buyer Region Code',
+          'Buyer Region Name',
           'Buyer Tax Number',
           'Buyer Name',
           'Supplier Tax Number',
@@ -846,7 +844,7 @@ export class BuyersService {
 
     return Promise.resolve({
       buffer: Buffer.from(
-        'Period,Supplier Region Code,Supplier Region Name,Buyer Tax Number,Buyer Name,Supplier Tax Number,Supplier,Product,UKTZED,Unit,Quantity,Price With VAT,Purchases With VAT\n',
+        'Period,Buyer Region Code,Buyer Region Name,Buyer Tax Number,Buyer Name,Supplier Tax Number,Supplier,Product,UKTZED,Unit,Quantity,Price With VAT,Purchases With VAT\n',
       ),
       fileName,
       mimeType: 'text/csv',
@@ -927,16 +925,9 @@ export class BuyersService {
   private resolvePreviousPeriod(
     currentRange: ResolvedDateRange,
   ): ResolvedDateRange {
-    const periodLengthInDays = this.getInclusiveDayCount(currentRange);
-    const previousPeriodEnd = this.shiftDate(currentRange.from, -1);
-    const previousPeriodStart = this.shiftDate(
-      previousPeriodEnd,
-      -(periodLengthInDays - 1),
-    );
-
     return {
-      from: previousPeriodStart,
-      to: previousPeriodEnd,
+      from: this.shiftDateByYears(currentRange.from, -1),
+      to: this.shiftDateByYears(currentRange.to, -1),
     };
   }
 
@@ -995,11 +986,19 @@ export class BuyersService {
     return new Date(`${value}T00:00:00.000Z`);
   }
 
-  private shiftDate(value: Date, days: number): Date {
-    const shifted = new Date(value);
-    shifted.setUTCDate(shifted.getUTCDate() + days);
+  private shiftDateByYears(value: Date, years: number): Date {
+    const targetYear = value.getUTCFullYear() + years;
+    const targetMonth = value.getUTCMonth();
+    const targetDay = Math.min(
+      value.getUTCDate(),
+      this.getDaysInUtcMonth(targetYear, targetMonth),
+    );
 
-    return shifted;
+    return new Date(Date.UTC(targetYear, targetMonth, targetDay));
+  }
+
+  private getDaysInUtcMonth(year: number, month: number): number {
+    return new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
   }
 
   private formatDateOnly(value: Date): string {

@@ -1,6 +1,7 @@
 export const REGISTRY_IMPORT_MAX_FILES = 20;
 export const REGISTRY_IMPORT_MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
 export const REGISTRY_IMPORT_INSERT_BATCH_SIZE = 1000;
+export const REGISTRY_IMPORT_SUPPORTED_EXTENSIONS = ['.xlsx', '.csv'] as const;
 
 export type RegistryRecordField =
   | 'sellerRegionCode'

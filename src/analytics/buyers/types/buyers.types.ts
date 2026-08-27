@@ -32,7 +32,7 @@ export type BuyersAnalyticsExportFormat =
 export type BuyersAnalyticsFilterSet = {
   buyerTaxNumbers: string[];
   supplierTaxNumbers: string[];
-  supplierRegionCodes: string[];
+  buyerRegionCodes: string[];
   uktzedValues: string[];
   products: string[];
 };
@@ -51,7 +51,7 @@ export type BuyersAnalyticsBaseScope = {
 export type BuyersAnalyticsKpiTotals = {
   purchasesWithVat: number;
   activeSuppliers: number;
-  supplierRegions: number;
+  buyerRegions: number;
   productPositions: number;
 };
 
@@ -85,7 +85,7 @@ export type BuyersAnalyticsMarketUktzed = {
 
 export type BuyersAnalyticsMarketStructure = {
   topSupplier: BuyersAnalyticsMarketEntity | null;
-  topSupplierRegion: BuyersAnalyticsMarketRegion | null;
+  topBuyerRegion: BuyersAnalyticsMarketRegion | null;
   topUKTZED: BuyersAnalyticsMarketUktzed | null;
   top5SuppliersShare: number | null;
 };
@@ -115,7 +115,7 @@ export type BuyersAnalyticsTopRegion = {
 
 export type BuyersAnalyticsTableItem = {
   periodStart: Date;
-  supplierRegionCode: string | null;
+  buyerRegionCode: string | null;
   buyerTaxNumber: string | null;
   buyerName: string | null;
   supplierTaxNumber: string | null;

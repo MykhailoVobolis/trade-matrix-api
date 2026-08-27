@@ -939,16 +939,9 @@ export class SuppliersService {
   private resolvePreviousPeriod(
     currentRange: ResolvedDateRange,
   ): ResolvedDateRange {
-    const periodLengthInDays = this.getInclusiveDayCount(currentRange);
-    const previousPeriodEnd = this.shiftDate(currentRange.from, -1);
-    const previousPeriodStart = this.shiftDate(
-      previousPeriodEnd,
-      -(periodLengthInDays - 1),
-    );
-
     return {
-      from: previousPeriodStart,
-      to: previousPeriodEnd,
+      from: this.shiftDateByYears(currentRange.from, -1),
+      to: this.shiftDateByYears(currentRange.to, -1),
     };
   }
 
@@ -1007,11 +1000,19 @@ export class SuppliersService {
     return new Date(`${value}T00:00:00.000Z`);
   }
 
-  private shiftDate(value: Date, days: number): Date {
-    const shifted = new Date(value);
-    shifted.setUTCDate(shifted.getUTCDate() + days);
+  private shiftDateByYears(value: Date, years: number): Date {
+    const targetYear = value.getUTCFullYear() + years;
+    const targetMonth = value.getUTCMonth();
+    const targetDay = Math.min(
+      value.getUTCDate(),
+      this.getDaysInUtcMonth(targetYear, targetMonth),
+    );
 
-    return shifted;
+    return new Date(Date.UTC(targetYear, targetMonth, targetDay));
+  }
+
+  private getDaysInUtcMonth(year: number, month: number): number {
+    return new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
   }
 
   private formatDateOnly(value: Date): string {

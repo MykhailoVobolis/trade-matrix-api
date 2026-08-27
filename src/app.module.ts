@@ -2,6 +2,7 @@ import { BuyersModule } from './analytics/buyers/buyers.module';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { OverviewModule } from './analytics/overview/overview.module';
+import { ProductsModule } from './analytics/products/products.module';
 import { SuppliersModule } from './analytics/suppliers/suppliers.module';
 import { AuthModule } from './auth/auth.module';
 import { AppController } from './app.controller';
@@ -17,6 +18,7 @@ import { UserModule } from './user/user.module';
     }),
     BuyersModule,
     OverviewModule,
+    ProductsModule,
     SuppliersModule,
     PrismaModule,
     AuthModule,
