@@ -133,7 +133,8 @@ export class UserController {
 
     res.clearCookie(cookieName, {
       httpOnly: true,
-      sameSite: 'lax',
+      sameSite: 'none',
+      secure: true,
       domain: cookieDomain || undefined,
       path: '/api/auth',
     });

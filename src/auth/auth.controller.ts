@@ -510,13 +510,11 @@ export class AuthController {
       this.configService.get<string>('AUTH_REFRESH_COOKIE_NAME') ??
       'refresh_token';
     const cookieDomain = this.configService.get<string>('AUTH_COOKIE_DOMAIN');
-    const secure =
-      this.configService.get<boolean>('AUTH_COOKIE_SECURE') ?? false;
 
     res.cookie(cookieName, refreshToken, {
       httpOnly: true,
-      sameSite: 'lax',
-      secure,
+      sameSite: 'none',
+      secure: true,
       domain: cookieDomain || undefined,
       path: '/api/auth',
       maxAge: REFRESH_TOKEN_LIFETIME,
@@ -531,7 +529,8 @@ export class AuthController {
 
     res.clearCookie(cookieName, {
       httpOnly: true,
-      sameSite: 'lax',
+      sameSite: 'none',
+      secure: true,
       domain: cookieDomain || undefined,
       path: '/api/auth',
     });
@@ -542,13 +541,11 @@ export class AuthController {
       this.configService.get<string>('AUTH_TWO_FACTOR_COOKIE_NAME') ??
       'two_factor_token';
     const cookieDomain = this.configService.get<string>('AUTH_COOKIE_DOMAIN');
-    const secure =
-      this.configService.get<boolean>('AUTH_COOKIE_SECURE') ?? false;
 
     res.cookie(cookieName, twoFactorToken, {
       httpOnly: true,
-      sameSite: 'lax',
-      secure,
+      sameSite: 'none',
+      secure: true,
       domain: cookieDomain || undefined,
       path: '/api/auth',
       maxAge: 10 * 60 * 1000,
@@ -563,7 +560,8 @@ export class AuthController {
 
     res.clearCookie(cookieName, {
       httpOnly: true,
-      sameSite: 'lax',
+      sameSite: 'none',
+      secure: true,
       domain: cookieDomain || undefined,
       path: '/api/auth',
     });
