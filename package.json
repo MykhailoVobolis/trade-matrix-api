@@ -32,7 +32,6 @@
     "prisma:studio": "prisma studio"
   },
   "dependencies": {
-    "@nestjs-modules/mailer": "^2.0.2",
     "@nestjs/common": "^11.0.1",
     "@nestjs/config": "^4.0.4",
     "@nestjs/core": "^11.0.1",
@@ -47,7 +46,6 @@
     "class-validator": "^0.15.1",
     "cloudinary": "^2.7.0",
     "dotenv": "^17.4.2",
-    "nodemailer": "^7.0.5",
     "otplib": "^12.0.1",
     "passport": "^0.7.0",
     "passport-google-oauth20": "^2.0.0",

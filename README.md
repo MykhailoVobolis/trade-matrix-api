@@ -72,13 +72,9 @@ AUTH_TWO_FACTOR_COOKIE_NAME=two_factor_token
 AUTH_COOKIE_DOMAIN=
 AUTH_COOKIE_SECURE=true
 
-MAIL_HOST=
-MAIL_PORT=
-MAIL_SECURE=
-MAIL_USER=
-MAIL_PASSWORD=
 MAIL_FROM=
 MAIL_REPLY_TO=
+BREVO_API_KEY=
 
 GOOGLE_AUTH_CLIENT_ID=
 GOOGLE_AUTH_CLIENT_SECRET=
@@ -103,5 +99,6 @@ INITIAL_ADMIN_EMAIL=
 
 - Run `pnpm prisma migrate deploy` during deployment before serving traffic.
 - `AUTH_COOKIE_SECURE` should be `true` in production behind HTTPS.
-- `MAIL_FROM` is the sender identity shown to the mail provider. `MAIL_REPLY_TO` controls where replies go.
+- `MAIL_FROM` is the sender identity shown to Brevo. `MAIL_REPLY_TO` controls where replies go.
+- `BREVO_API_KEY` is required for transactional email delivery over HTTPS via the Brevo API.
 - Google auth requires the callback URL to match the value configured in Google Cloud.
