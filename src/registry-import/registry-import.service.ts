@@ -50,6 +50,12 @@ type ParsedWorkbook = {
   rows: (string | number | boolean | Date | null)[][];
 };
 
+type DenseWorksheetCell = {
+  t?: string;
+  v?: unknown;
+  w?: string;
+};
+
 type RegistryRecordListItem = {
   id: string;
   importId: string;
@@ -1006,7 +1012,7 @@ export class RegistryImportService {
 
     const workbook = read(file.buffer, {
       type: 'buffer',
-      cellDates: true,
+      cellDates: false,
       dense: true,
     });
     const firstSheetName = workbook.SheetNames[0] ?? null;
@@ -1027,6 +1033,8 @@ export class RegistryImportService {
       defval: null,
       blankrows: false,
     });
+
+    this.normalizeXlsxDateColumns(firstSheet, rows);
 
     return {
       firstSheetName,
@@ -1113,6 +1121,174 @@ export class RegistryImportService {
     }
 
     return score;
+  }
+
+  private normalizeXlsxDateColumns(
+    sheet: unknown,
+    rows: (string | number | boolean | Date | null)[][],
+  ): void {
+    if (rows.length === 0) {
+      return;
+    }
+
+    const headerRow =
+      rows[0]?.map((value) => this.normalizeCellValue(value)) ?? [];
+    const dateColumnIndexes = headerRow.reduce<number[]>(
+      (indexes, header, i) => {
+        if (header === 'Дата виписки' || header === 'Дата реєстрації') {
+          indexes.push(i);
+        }
+
+        return indexes;
+      },
+      [],
+    );
+
+    if (dateColumnIndexes.length === 0) {
+      return;
+    }
+
+    rows.slice(1).forEach((row, rowOffset) => {
+      const denseRow = this.getDenseWorksheetRow(sheet, rowOffset + 1);
+
+      if (!denseRow) {
+        return;
+      }
+
+      for (const columnIndex of dateColumnIndexes) {
+        const normalizedDate = this.normalizeWorksheetDateCell(
+          denseRow[columnIndex],
+          row[columnIndex] ?? null,
+        );
+
+        if (normalizedDate) {
+          row[columnIndex] = normalizedDate;
+        }
+      }
+    });
+  }
+
+  private getDenseWorksheetRow(
+    sheet: unknown,
+    rowIndex: number,
+  ): unknown[] | null {
+    if (!Array.isArray(sheet)) {
+      return null;
+    }
+
+    const row: unknown = sheet[rowIndex];
+
+    return Array.isArray(row) ? row : null;
+  }
+
+  private normalizeWorksheetDateCell(
+    cell: unknown,
+    fallbackValue: string | number | boolean | Date | null,
+  ): string | null {
+    const denseCell = this.toDenseWorksheetCell(cell);
+
+    if (denseCell && typeof denseCell.v === 'number') {
+      const parsedDate = this.parseExcelSerialDate(denseCell.v);
+
+      if (parsedDate) {
+        return parsedDate;
+      }
+    }
+
+    const displayedDate = denseCell?.w
+      ? this.parseExcelDisplayedDate(denseCell.w)
+      : null;
+
+    if (displayedDate) {
+      return displayedDate;
+    }
+
+    if (typeof fallbackValue === 'string') {
+      return this.parseExcelDisplayedDate(fallbackValue) ?? fallbackValue;
+    }
+
+    return null;
+  }
+
+  private toDenseWorksheetCell(cell: unknown): DenseWorksheetCell | null {
+    if (!cell || typeof cell !== 'object' || Array.isArray(cell)) {
+      return null;
+    }
+
+    const { t, v, w } = cell as {
+      t?: unknown;
+      v?: unknown;
+      w?: unknown;
+    };
+
+    return {
+      t: typeof t === 'string' ? t : undefined,
+      v,
+      w: typeof w === 'string' ? w : undefined,
+    };
+  }
+
+  private parseExcelSerialDate(serial: number): string | null {
+    if (!Number.isFinite(serial)) {
+      return null;
+    }
+
+    const wholeDays = Math.floor(serial);
+    const excelEpochUtc = Date.UTC(1899, 11, 30);
+    const date = new Date(excelEpochUtc + wholeDays * 24 * 60 * 60 * 1000);
+
+    if (Number.isNaN(date.getTime())) {
+      return null;
+    }
+
+    return this.buildIsoDateString(
+      date.getUTCFullYear(),
+      date.getUTCMonth() + 1,
+      date.getUTCDate(),
+    );
+  }
+
+  private parseExcelDisplayedDate(value: string): string | null {
+    const normalized = value.trim();
+    const match =
+      /^(\d{1,2})\/(\d{1,2})\/(\d{2,4})(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?$/u.exec(
+        normalized,
+      );
+
+    if (!match) {
+      return null;
+    }
+
+    const [, monthRaw, dayRaw, yearRaw] = match;
+    const yearNumber = Number(yearRaw);
+    const year =
+      yearRaw.length === 2
+        ? yearNumber >= 70
+          ? 1900 + yearNumber
+          : 2000 + yearNumber
+        : yearNumber;
+
+    return this.buildIsoDateString(year, Number(monthRaw), Number(dayRaw));
+  }
+
+  private buildIsoDateString(
+    year: number,
+    month: number,
+    day: number,
+  ): string | null {
+    if (
+      !Number.isInteger(year) ||
+      !Number.isInteger(month) ||
+      !Number.isInteger(day) ||
+      month < 1 ||
+      month > 12 ||
+      day < 1 ||
+      day > 31
+    ) {
+      return null;
+    }
+
+    return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
   }
 
   private detectCsvDelimiter(csvText: string): string {
