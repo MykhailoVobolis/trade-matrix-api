@@ -759,9 +759,18 @@ export class RegistryImportService {
       return Number.isNaN(date.getTime()) ? null : date;
     }
 
-    const isoDate = new Date(normalized);
+    const isoSeparatedMatch = /^(\d{4})-(\d{1,2})-(\d{1,2})$/u.exec(normalized);
 
-    return Number.isNaN(isoDate.getTime()) ? null : isoDate;
+    if (isoSeparatedMatch) {
+      const [, year, month, day] = isoSeparatedMatch;
+      const date = new Date(
+        Date.UTC(Number(year), Number(month) - 1, Number(day)),
+      );
+
+      return Number.isNaN(date.getTime()) ? null : date;
+    }
+
+    return null;
   }
 
   private normalizeUktzedCode(value: string | undefined): string | null {
@@ -1007,6 +1016,7 @@ export class RegistryImportService {
       firstSheet,
       {
         header: 1,
+        dateNF: 'yyyy-mm-dd',
         raw: false,
         defval: null,
         blankrows: false,
