@@ -47,7 +47,7 @@ type RegistryImportRecord = {
 
 type ParsedWorkbook = {
   firstSheetName: string | null;
-  rows: (string | number | boolean | null)[][];
+  rows: (string | number | boolean | Date | null)[][];
 };
 
 type RegistryRecordListItem = {
@@ -595,7 +595,7 @@ export class RegistryImportService {
   }
 
   private getNormalizedDataRows(
-    rows: (string | number | boolean | null)[][],
+    rows: (string | number | boolean | Date | null)[][],
   ): string[][] {
     const normalizedRows = rows.map((row) =>
       row.map((value) => this.normalizeCellValue(value)),
@@ -619,10 +619,16 @@ export class RegistryImportService {
   }
 
   private normalizeCellValue(
-    value: string | number | boolean | null | undefined,
+    value: string | number | boolean | Date | null | undefined,
   ): string {
     if (value === null || value === undefined) {
       return '';
+    }
+
+    if (value instanceof Date) {
+      return Number.isNaN(value.getTime())
+        ? ''
+        : value.toISOString().slice(0, 10);
     }
 
     return String(value)
@@ -1000,6 +1006,7 @@ export class RegistryImportService {
 
     const workbook = read(file.buffer, {
       type: 'buffer',
+      cellDates: true,
       dense: true,
     });
     const firstSheetName = workbook.SheetNames[0] ?? null;
@@ -1012,16 +1019,14 @@ export class RegistryImportService {
     }
 
     const firstSheet = workbook.Sheets[firstSheetName];
-    const rows = utils.sheet_to_json<(string | number | boolean | null)[]>(
-      firstSheet,
-      {
-        header: 1,
-        dateNF: 'yyyy-mm-dd',
-        raw: false,
-        defval: null,
-        blankrows: false,
-      },
-    );
+    const rows = utils.sheet_to_json<
+      (string | number | boolean | Date | null)[]
+    >(firstSheet, {
+      header: 1,
+      raw: true,
+      defval: null,
+      blankrows: false,
+    });
 
     return {
       firstSheetName,
@@ -1067,15 +1072,14 @@ export class RegistryImportService {
     }
 
     const firstSheet = workbook.Sheets[firstSheetName];
-    const rows = utils.sheet_to_json<(string | number | boolean | null)[]>(
-      firstSheet,
-      {
-        header: 1,
-        raw: true,
-        defval: null,
-        blankrows: false,
-      },
-    );
+    const rows = utils.sheet_to_json<
+      (string | number | boolean | Date | null)[]
+    >(firstSheet, {
+      header: 1,
+      raw: true,
+      defval: null,
+      blankrows: false,
+    });
 
     return {
       firstSheetName,
@@ -1084,7 +1088,7 @@ export class RegistryImportService {
   }
 
   private getHeaderMatchScore(
-    rows: (string | number | boolean | null)[][],
+    rows: (string | number | boolean | Date | null)[][],
   ): number {
     const headerRow =
       rows[0]?.map((value) => this.normalizeCellValue(value)) ?? [];
