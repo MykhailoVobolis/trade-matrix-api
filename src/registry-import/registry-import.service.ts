@@ -20,7 +20,10 @@ import {
   REGISTRY_IMPORT_MAX_FILE_SIZE_BYTES,
   REGISTRY_IMPORT_MAX_FILES,
   REGISTRY_IMPORT_MAX_TOTAL_SIZE_BYTES,
+  REGISTRY_IMPORT_QUEUE_ATTEMPTS,
+  REGISTRY_IMPORT_QUEUE_BACKOFF_MS,
   REGISTRY_IMPORT_REQUIRED_HEADERS,
+  REGISTRY_IMPORT_STALE_TIMEOUT_MS,
   REGISTRY_IMPORT_SUPPORTED_EXTENSIONS,
 } from './constants/registry-import.constants';
 import { RegistryImportItemDto } from './dto/registry-import-item.dto';
@@ -99,7 +102,7 @@ export class RegistryImportService {
     private readonly registryImportQueue: Queue<RegistryImportJobData>,
   ) {}
 
-  uploadFiles(
+  async uploadFiles(
     user: AuthenticatedUser,
     files: UploadedRegistryImportFile[],
   ): Promise<RegistryImportItemDto[]> {
@@ -296,16 +299,33 @@ export class RegistryImportService {
     }
 
     this.pendingFiles.set(importRecord.id, file);
-    await this.registryImportQueue.add(
-      'process',
-      {
-        importId: importRecord.id,
-        userId: user.userId,
-      },
-      {
-        jobId: importRecord.id,
-      },
-    );
+    try {
+      await this.registryImportQueue.add(
+        'process',
+        {
+          importId: importRecord.id,
+          userId: user.userId,
+        },
+        {
+          jobId: importRecord.id,
+          attempts: REGISTRY_IMPORT_QUEUE_ATTEMPTS,
+          backoff: {
+            type: 'exponential',
+            delay: REGISTRY_IMPORT_QUEUE_BACKOFF_MS,
+          },
+          removeOnComplete: true,
+          removeOnFail: false,
+        },
+      );
+    } catch {
+      this.pendingFiles.delete(importRecord.id);
+      const failedImport = await this.registryImportRepository.markFailed(
+        importRecord.id,
+        'Failed to add the spreadsheet to the processing queue.',
+      );
+
+      return this.toRegistryImportItemDto(failedImport);
+    }
 
     return this.toRegistryImportItemDto(importRecord);
   }
@@ -367,11 +387,35 @@ export class RegistryImportService {
       return;
     }
 
-    try {
-      await this.processWorkbookImport(importId, userId, file);
-    } finally {
-      this.pendingFiles.delete(importId);
-    }
+    await this.processWorkbookImport(importId, userId, file);
+    this.pendingFiles.delete(importId);
+  }
+
+  async getImportStatus(
+    importId: string,
+  ): Promise<PrismaRegistryImportStatus | null> {
+    const importRecord =
+      await this.registryImportRepository.findStatusById(importId);
+
+    return importRecord?.status ?? null;
+  }
+
+  async markQueueJobFailed(
+    importId: string,
+    errorMessage: string,
+  ): Promise<void> {
+    this.pendingFiles.delete(importId);
+    await this.registryImportRepository.deleteRecordsByImportId(importId);
+    await this.registryImportRepository.markFailed(importId, errorMessage);
+  }
+
+  async recoverStaleImports(): Promise<void> {
+    const staleBefore = new Date(Date.now() - REGISTRY_IMPORT_STALE_TIMEOUT_MS);
+
+    await this.registryImportRepository.markStaleImportsFailed(
+      staleBefore,
+      'Import processing timed out and was stopped.',
+    );
   }
 
   private async processWorkbookImport(
@@ -428,20 +472,21 @@ export class RegistryImportService {
         userId,
         operationFingerprints,
       );
+      const currentStatus = await this.getImportStatus(importId);
+
+      if (currentStatus !== PrismaRegistryImportStatus.processing) {
+        throw new Error('Registry import processing timed out.');
+      }
+
       const completedImport = await this.registryImportRepository.markCompleted(
         importId,
         parsedRows.length,
       );
 
       return this.toRegistryImportItemDto(completedImport);
-    } catch {
+    } catch (error) {
       await this.registryImportRepository.deleteRecordsByImportId(importId);
-      const failedImport = await this.registryImportRepository.markFailed(
-        importId,
-        'Failed to parse or persist the spreadsheet file.',
-      );
-
-      return this.toRegistryImportItemDto(failedImport);
+      throw error;
     }
   }
 

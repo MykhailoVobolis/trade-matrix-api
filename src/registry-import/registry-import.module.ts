@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { BullModule } from '@nestjs/bullmq';
+import { REGISTRY_IMPORT_QUEUE_ATTEMPTS } from './constants/registry-import.constants';
 import { RegistryImportController } from './registry-import.controller';
 import { RegistryImportRepository } from './registry-import.repository';
 import { REGISTRY_IMPORT_QUEUE_NAME } from './registry-import.queue';
@@ -34,7 +35,14 @@ import { RegistryImportService } from './registry-import.service';
         };
       },
     }),
-    BullModule.registerQueue({ name: REGISTRY_IMPORT_QUEUE_NAME }),
+    BullModule.registerQueue({
+      name: REGISTRY_IMPORT_QUEUE_NAME,
+      defaultJobOptions: {
+        attempts: REGISTRY_IMPORT_QUEUE_ATTEMPTS,
+        removeOnComplete: true,
+        removeOnFail: false,
+      },
+    }),
   ],
   controllers: [RegistryImportController],
   providers: [

@@ -10,16 +10,17 @@ NestJS API for authentication, user management, file-backed avatar uploads, and 
 pnpm install
 ```
 
-2. Start PostgreSQL in Docker:
+2. Start PostgreSQL and Redis in Docker:
 
 ```bash
-docker compose up -d db
+docker compose up -d db redis
 ```
 
 3. Set `DATABASE_URL` in `.env` for the host machine:
 
 ```env
 DATABASE_URL="postgresql://postgres:postgres@localhost:5433/trade_matrix?schema=public"
+REDIS_URL="redis://localhost:6379"
 ```
 
 4. Apply Prisma migrations:
@@ -60,6 +61,7 @@ Set these variables in the deployment environment before starting the API.
 NODE_ENV=production
 PORT=8000
 DATABASE_URL=
+REDIS_URL=
 
 JWT_ACCESS_SECRET=
 JWT_REFRESH_SECRET=
@@ -101,4 +103,7 @@ INITIAL_ADMIN_EMAIL=
 - `AUTH_COOKIE_SECURE` should be `true` in production behind HTTPS.
 - `MAIL_FROM` is the sender identity shown to Brevo. `MAIL_REPLY_TO` controls where replies go.
 - `BREVO_API_KEY` is required for transactional email delivery over HTTPS via the Brevo API.
+- Redis is required for registry import processing. On Railway, add a Redis database service and set `REDIS_URL` on the API service to `${{Redis.REDIS_URL}}` (replace `Redis` with the actual service name if different).
+- Registry imports are processed sequentially with up to 3 attempts and exponential backoff. Jobs that remain queued or processing for more than 60 minutes are marked as failed.
+- The current intermediate queue stores uploaded file buffers in the API process. A process restart cannot resume an uploaded file until Object Storage is added.
 - Google auth requires the callback URL to match the value configured in Google Cloud.
