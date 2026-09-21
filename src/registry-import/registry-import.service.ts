@@ -19,6 +19,7 @@ import {
   REGISTRY_IMPORT_INSERT_BATCH_SIZE,
   REGISTRY_IMPORT_MAX_FILE_SIZE_BYTES,
   REGISTRY_IMPORT_MAX_FILES,
+  REGISTRY_IMPORT_MAX_TOTAL_SIZE_BYTES,
   REGISTRY_IMPORT_REQUIRED_HEADERS,
   REGISTRY_IMPORT_SUPPORTED_EXTENSIONS,
 } from './constants/registry-import.constants';
@@ -101,6 +102,14 @@ export class RegistryImportService {
     if (files.length > REGISTRY_IMPORT_MAX_FILES) {
       throw new BadRequestException(
         `No more than ${REGISTRY_IMPORT_MAX_FILES} files can be uploaded at once.`,
+      );
+    }
+
+    const totalSizeBytes = files.reduce((total, file) => total + file.size, 0);
+
+    if (totalSizeBytes > REGISTRY_IMPORT_MAX_TOTAL_SIZE_BYTES) {
+      throw new BadRequestException(
+        `The total upload size must not exceed ${REGISTRY_IMPORT_MAX_TOTAL_SIZE_BYTES} bytes.`,
       );
     }
 
