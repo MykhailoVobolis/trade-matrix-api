@@ -19,7 +19,11 @@ import {
   REGISTRY_IMPORT_INSERT_BATCH_SIZE,
   REGISTRY_IMPORT_MAX_FILE_SIZE_BYTES,
   REGISTRY_IMPORT_MAX_FILES,
+  REGISTRY_IMPORT_MAX_TOTAL_SIZE_BYTES,
+  REGISTRY_IMPORT_QUEUE_ATTEMPTS,
+  REGISTRY_IMPORT_QUEUE_BACKOFF_MS,
   REGISTRY_IMPORT_REQUIRED_HEADERS,
+  REGISTRY_IMPORT_STALE_TIMEOUT_MS,
   REGISTRY_IMPORT_SUPPORTED_EXTENSIONS,
 } from './constants/registry-import.constants';
 import { RegistryImportItemDto } from './dto/registry-import-item.dto';
@@ -32,6 +36,12 @@ import { RegistryRecordListResponseDto } from './dto/registry-record-list-respon
 import { ParsedRegistryRecord } from './types/parsed-registry-record.type';
 import { UploadedRegistryImportFile } from './types/registry-import-file.type';
 import { RegistryImportRepository } from './registry-import.repository';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
+import {
+  REGISTRY_IMPORT_QUEUE_NAME,
+  RegistryImportJobData,
+} from './registry-import.queue';
 
 type RegistryImportRecord = {
   id: string;
@@ -84,11 +94,15 @@ type RegistryRecordCreateInputDraft = Prisma.RegistryRecordCreateManyInput & {
 
 @Injectable()
 export class RegistryImportService {
+  private readonly pendingFiles = new Map<string, UploadedRegistryImportFile>();
+
   constructor(
     private readonly registryImportRepository: RegistryImportRepository,
+    @InjectQueue(REGISTRY_IMPORT_QUEUE_NAME)
+    private readonly registryImportQueue: Queue<RegistryImportJobData>,
   ) {}
 
-  uploadFiles(
+  async uploadFiles(
     user: AuthenticatedUser,
     files: UploadedRegistryImportFile[],
   ): Promise<RegistryImportItemDto[]> {
@@ -101,6 +115,14 @@ export class RegistryImportService {
     if (files.length > REGISTRY_IMPORT_MAX_FILES) {
       throw new BadRequestException(
         `No more than ${REGISTRY_IMPORT_MAX_FILES} files can be uploaded at once.`,
+      );
+    }
+
+    const totalSizeBytes = files.reduce((total, file) => total + file.size, 0);
+
+    if (totalSizeBytes > REGISTRY_IMPORT_MAX_TOTAL_SIZE_BYTES) {
+      throw new BadRequestException(
+        `The total upload size must not exceed ${REGISTRY_IMPORT_MAX_TOTAL_SIZE_BYTES} bytes.`,
       );
     }
 
@@ -276,7 +298,34 @@ export class RegistryImportService {
       return this.toRegistryImportItemDto(importRecord);
     }
 
-    this.scheduleWorkbookImportProcessing(importRecord.id, user.userId, file);
+    this.pendingFiles.set(importRecord.id, file);
+    try {
+      await this.registryImportQueue.add(
+        'process',
+        {
+          importId: importRecord.id,
+          userId: user.userId,
+        },
+        {
+          jobId: importRecord.id,
+          attempts: REGISTRY_IMPORT_QUEUE_ATTEMPTS,
+          backoff: {
+            type: 'exponential',
+            delay: REGISTRY_IMPORT_QUEUE_BACKOFF_MS,
+          },
+          removeOnComplete: true,
+          removeOnFail: false,
+        },
+      );
+    } catch {
+      this.pendingFiles.delete(importRecord.id);
+      const failedImport = await this.registryImportRepository.markFailed(
+        importRecord.id,
+        'Failed to add the spreadsheet to the processing queue.',
+      );
+
+      return this.toRegistryImportItemDto(failedImport);
+    }
 
     return this.toRegistryImportItemDto(importRecord);
   }
@@ -324,14 +373,49 @@ export class RegistryImportService {
     return createHash('sha256').update(buffer).digest('hex');
   }
 
-  private scheduleWorkbookImportProcessing(
+  async processQueuedImport({
+    importId,
+    userId,
+  }: RegistryImportJobData): Promise<void> {
+    const file = this.pendingFiles.get(importId);
+
+    if (!file) {
+      await this.registryImportRepository.markFailed(
+        importId,
+        'The uploaded file is no longer available in the current process.',
+      );
+      return;
+    }
+
+    await this.processWorkbookImport(importId, userId, file);
+    this.pendingFiles.delete(importId);
+  }
+
+  async getImportStatus(
     importId: string,
-    userId: string,
-    file: UploadedRegistryImportFile,
-  ): void {
-    setImmediate(() => {
-      void this.processWorkbookImport(importId, userId, file);
-    });
+  ): Promise<PrismaRegistryImportStatus | null> {
+    const importRecord =
+      await this.registryImportRepository.findStatusById(importId);
+
+    return importRecord?.status ?? null;
+  }
+
+  async markQueueJobFailed(
+    importId: string,
+    errorMessage: string,
+  ): Promise<void> {
+    this.pendingFiles.delete(importId);
+    await this.registryImportRepository.deleteRecordsByImportId(importId);
+    await this.registryImportRepository.markFailed(importId, errorMessage);
+  }
+
+  async recoverStaleImports(): Promise<void> {
+    const staleBefore = new Date(Date.now() - REGISTRY_IMPORT_STALE_TIMEOUT_MS);
+
+    await this.registryImportRepository.markStaleImportsFailed(
+      staleBefore,
+      'Import processing timed out and was stopped.',
+    );
   }
 
   private async processWorkbookImport(
@@ -388,20 +472,21 @@ export class RegistryImportService {
         userId,
         operationFingerprints,
       );
+      const currentStatus = await this.getImportStatus(importId);
+
+      if (currentStatus !== PrismaRegistryImportStatus.processing) {
+        throw new Error('Registry import processing timed out.');
+      }
+
       const completedImport = await this.registryImportRepository.markCompleted(
         importId,
         parsedRows.length,
       );
 
       return this.toRegistryImportItemDto(completedImport);
-    } catch {
+    } catch (error) {
       await this.registryImportRepository.deleteRecordsByImportId(importId);
-      const failedImport = await this.registryImportRepository.markFailed(
-        importId,
-        'Failed to parse or persist the spreadsheet file.',
-      );
-
-      return this.toRegistryImportItemDto(failedImport);
+      throw error;
     }
   }
 

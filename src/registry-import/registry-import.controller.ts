@@ -30,6 +30,7 @@ import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
 import {
   REGISTRY_IMPORT_MAX_FILES,
   REGISTRY_IMPORT_MAX_FILE_SIZE_BYTES,
+  REGISTRY_IMPORT_MAX_TOTAL_SIZE_BYTES,
   REGISTRY_IMPORT_SUPPORTED_EXTENSIONS,
 } from './constants/registry-import.constants';
 import { ListRegistryImportsQueryDto } from './dto/list-registry-imports-query.dto';
@@ -68,11 +69,11 @@ export class RegistryImportController {
     },
   })
   @ApiOperation({
-    summary: 'Upload up to 20 registry XLSX or CSV files for the current user',
+    summary: 'Upload up to 10 registry XLSX or CSV files for the current user',
   })
   @ApiOkResponse({ type: RegistryImportUploadResponseDto })
   @ApiBadRequestResponse({
-    description: `Each file must be one of ${REGISTRY_IMPORT_SUPPORTED_EXTENSIONS.join(', ')} and must not exceed ${REGISTRY_IMPORT_MAX_FILE_SIZE_BYTES} bytes.`,
+    description: `Each file must be one of ${REGISTRY_IMPORT_SUPPORTED_EXTENSIONS.join(', ')} and must not exceed ${REGISTRY_IMPORT_MAX_FILE_SIZE_BYTES} bytes. The total upload size must not exceed ${REGISTRY_IMPORT_MAX_TOTAL_SIZE_BYTES} bytes.`,
   })
   @ApiUnauthorizedResponse({ description: 'Missing or invalid access token' })
   async uploadFiles(

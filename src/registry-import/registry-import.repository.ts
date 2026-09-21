@@ -168,6 +168,31 @@ export class RegistryImportRepository {
     });
   }
 
+  markStaleImportsFailed(staleBefore: Date, errorMessage: string) {
+    return this.prisma.registryImport.updateMany({
+      where: {
+        status: {
+          in: [RegistryImportStatus.queued, RegistryImportStatus.processing],
+        },
+        updatedAt: {
+          lt: staleBefore,
+        },
+      },
+      data: {
+        status: RegistryImportStatus.failed,
+        finishedAt: new Date(),
+        errorMessage,
+      },
+    });
+  }
+
+  findStatusById(importId: string) {
+    return this.prisma.registryImport.findUnique({
+      where: { id: importId },
+      select: { status: true },
+    });
+  }
+
   deleteRecordsByImportId(importId: string) {
     return this.prisma.registryRecord.deleteMany({
       where: { importId },
