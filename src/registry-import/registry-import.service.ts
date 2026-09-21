@@ -33,6 +33,12 @@ import { RegistryRecordListResponseDto } from './dto/registry-record-list-respon
 import { ParsedRegistryRecord } from './types/parsed-registry-record.type';
 import { UploadedRegistryImportFile } from './types/registry-import-file.type';
 import { RegistryImportRepository } from './registry-import.repository';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
+import {
+  REGISTRY_IMPORT_QUEUE_NAME,
+  RegistryImportJobData,
+} from './registry-import.queue';
 
 type RegistryImportRecord = {
   id: string;
@@ -85,8 +91,12 @@ type RegistryRecordCreateInputDraft = Prisma.RegistryRecordCreateManyInput & {
 
 @Injectable()
 export class RegistryImportService {
+  private readonly pendingFiles = new Map<string, UploadedRegistryImportFile>();
+
   constructor(
     private readonly registryImportRepository: RegistryImportRepository,
+    @InjectQueue(REGISTRY_IMPORT_QUEUE_NAME)
+    private readonly registryImportQueue: Queue<RegistryImportJobData>,
   ) {}
 
   uploadFiles(
@@ -285,7 +295,17 @@ export class RegistryImportService {
       return this.toRegistryImportItemDto(importRecord);
     }
 
-    this.scheduleWorkbookImportProcessing(importRecord.id, user.userId, file);
+    this.pendingFiles.set(importRecord.id, file);
+    await this.registryImportQueue.add(
+      'process',
+      {
+        importId: importRecord.id,
+        userId: user.userId,
+      },
+      {
+        jobId: importRecord.id,
+      },
+    );
 
     return this.toRegistryImportItemDto(importRecord);
   }
@@ -333,14 +353,25 @@ export class RegistryImportService {
     return createHash('sha256').update(buffer).digest('hex');
   }
 
-  private scheduleWorkbookImportProcessing(
-    importId: string,
-    userId: string,
-    file: UploadedRegistryImportFile,
-  ): void {
-    setImmediate(() => {
-      void this.processWorkbookImport(importId, userId, file);
-    });
+  async processQueuedImport({
+    importId,
+    userId,
+  }: RegistryImportJobData): Promise<void> {
+    const file = this.pendingFiles.get(importId);
+
+    if (!file) {
+      await this.registryImportRepository.markFailed(
+        importId,
+        'The uploaded file is no longer available in the current process.',
+      );
+      return;
+    }
+
+    try {
+      await this.processWorkbookImport(importId, userId, file);
+    } finally {
+      this.pendingFiles.delete(importId);
+    }
   }
 
   private async processWorkbookImport(
